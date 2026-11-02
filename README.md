@@ -15,7 +15,7 @@ Official open-source Python reference engine and verification suite for the manu
 
 In low-to-medium energy high-intensity hadron accumulator rings, rapid-cycling synchrotrons, and injector boosters—such as the **LANL Proton Storage Ring (PSR)** ($E_k = 800\,\mathrm{MeV}, T_{\mathrm{rev}} = 0.358\,\mu\mathrm{s}$), **ORNL Spallation Neutron Source (SNS)** ($E_k = 1.0\,\mathrm{GeV}, T_{\mathrm{rev}} = 0.945\,\mu\mathrm{s}, \Delta Q_{\mathrm{sc}} = -0.2271$), **CERN Proton Synchrotron Booster (PSB)** ($T_{\mathrm{rev}} = 0.57\text{--}1.01\,\mu\mathrm{s}$), and **FAIR SIS18**—the incoherent Laslett space-charge tune shift reaches $|\Delta Q_{\mathrm{sc}}| \approx 0.1\text{--}0.4$, driving envelope mismatch oscillations and transverse emittance growth over a few turns ($5$-turn control window $= 4.73\,\mu\mathrm{s} \le 5.0\,\mu\mathrm{s}$).
 
-This repository implements the three 1994 Los Alamos theorems, the exact $O(M_E)$ Moment-Space Zero-Self-Force (ZSF) dipolar gauge projection, and a non-circular 2D-in-3D pairwise Plummer-Coulomb multi-turn Leapfrog tracking and 4-mode ablation suite:
+This repository implements the three 1994 Los Alamos theorems, the exact $O(M_E)$ Moment-Space Zero-Self-Force (ZSF) dipolar gauge projection, and a non-circular 2D-in-3D pairwise Plummer-Coulomb multi-turn Leapfrog tracking and 7-mode ablation suite:
 
 1. **Theorem 1 — Affine Charge Inversion with Normalized Physical Prior (`report1.pdf`)**:
    $$\mathbf{a} = \mathbf{\Lambda}\mathbf{s} + \mathbf{c}, \qquad \mathbf{\Lambda} = \mathbf{\Omega}^T(\mathbf{\Omega}\mathbf{\Omega}^T)^{-1}, \qquad \mathbf{c} = (\mathbf{I}_N - \mathbf{\Lambda}\mathbf{\Omega})\boldsymbol{\mu}, \qquad \operatorname{rank}(\mathbf{\Omega}) = 35$$
@@ -30,24 +30,35 @@ This repository implements the three 1994 Los Alamos theorems, the exact $O(M_E)
    $$\mathbf{v}_E^{\mathrm{prior}} = \mathbf{K}_E\mathbf{s} + \mathbf{v}_{E,0}, \qquad \mathbf{K}_E \in \mathbb{R}^{34 \times 35}$$
    - For state-dependent weighting ($\mathbf{w} = \mathbf{a}$), preserves all $M_E = 34$ generalized electric-field moment averages ($4.17 \times 10^{-16}$) and zero net self-force ($\|\langle\mathbf{E}_{\mathrm{approx}}(\mathbf{a})\rangle_{\mathbf{a}}\|_\infty = 4.58 \times 10^{-16}$).
    - For fixed reference-prior weighting ($\mathbf{w} = \boldsymbol{\mu}$), $\langle\mathbf{E}_{\mathrm{approx}}(\boldsymbol{\mu})\rangle_{\boldsymbol{\mu}} = \langle\mathbf{E}_{\mathrm{exact}}\rangle_{\boldsymbol{\mu}}$ holds to $2.03 \times 10^{-15}$, which leaves a non-zero net force $\langle\mathbf{E}_{\mathrm{approx}}^{\mathrm{prior}}\rangle_{\mathbf{a}} = (0.1123, -0.0732, 0.0727)$ on a perturbed state $\mathbf{a} = \boldsymbol{\mu} + \delta\mathbf{a}$.
-   - **Exact Moment-Space ZSF Dipolar Gauge Projection (`apply_zero_self_force_gauge`)**: Using the exact moment differentiation identity $\tilde{\mathbf{\Omega}}^{x_j} = \mathbf{D}_{x_j}^{\mathrm{mom}}\mathbf{\Omega}$, shifts the 3 dipolar components in $O(M_E)$ scalar operations using only $\mathbf{s} \in \mathbb{R}^{35}$ to restore **exact zero net self-force on the perturbed distribution $\mathbf{a}$ ($\|\langle\mathbf{E}_{\mathrm{approx}}^{\mathrm{ZSF}}\rangle_{\mathbf{a}}\|_\infty = 4.02 \times 10^{-16}$)** without touching the $N$-point grid or altering higher-order multipole gradients!
-   - Quantifies both reference-prior linearization accuracy ($\mathbf{w}=\boldsymbol{\mu}$ vs. $\mathbf{w}=\mathbf{a}$, $11.74\%$ quadrupole gradient difference) and interior beam-core fit fidelity ($R^2 = 0.8962$, RMS relative error $32.22\%$ inside $r \le 0.45$).
+   - **Exact Moment-Space ZSF Dipolar Gauge Projection (`apply_zero_self_force_gauge`)**: Using the exact moment differentiation identity $\tilde{\mathbf{\Omega}}^{x_j} = \mathbf{D}_{x_j}^{\mathrm{mom}}\mathbf{\Omega}$, shifts the 3 dipolar components in $O(M_E)$ scalar operations ($57$ non-zero derivative terms) using only $\mathbf{s} \in \mathbb{R}^{35}$ to restore **exact zero net self-force on the perturbed distribution $\mathbf{a}$ ($\|\langle\mathbf{E}_{\mathrm{approx}}^{\mathrm{ZSF}}\rangle_{\mathbf{a}}\|_\infty = 4.02 \times 10^{-16}$)** without touching the $N$-point grid or altering higher-order multipole gradients.
 
-4. **Idealized Multi-Turn 2D-in-3D Pairwise-Coulomb Leapfrog Tracking & 4-Mode Ablation (`simulate_multiturn_envelope_tracking`)**:
+4. **Idealized Multi-Turn 2D-in-3D Pairwise-Coulomb Leapfrog Tracking & 7-Mode Ablation (`simulate_multiturn_envelope_tracking`)**:
    - Tracks $N_p = 500$ macro-particles over $N_{\mathrm{turns}} = 80$ turns ($K_{\mathrm{sub}} = 4$ Leapfrog substeps/turn) from **strictly identical initial conditions** under **exact self-consistent $O(N_p^2)$ 3D pairwise Plummer-Coulomb forces** ($\Delta Q_{\mathrm{sc,eff}} = -0.1817$).
-   - Contrasts physical multipole corrector subsets (**Mode B**, 11 dipole/quadrupole/octupole terms) against the idealized full 34-basis operator (**Mode C**) and 2nd-moment rate damping (**Mode D**), verified across multiple independent random seeds (`42, 1, 7, 99`):
+   - Directly compares uncorrected prior operators (**Modes B, C, D**) against centroid-aligned ZSF-projected operators (**Modes B-ZSF, C-ZSF, D-ZSF**), verified across four independent random seeds (`42, 1, 7, 99`):
 
-| Ablation Mode (Identical $t=0$ State, Seed 42) | Controller Input | RMS Emittance Growth | RMS Envelope Mismatch | High-Action Halo ($J_\perp > 3.5\sigma_0^2$) |
-| :--- | :--- | :---: | :---: | :---: |
-| **Mode A**: Open-Loop Uncompensated | None ($\mathbf{v}_E = \mathbf{0}$) | $+40.65\%$ | $16.60\%$ | $29.60\%$ |
-| **Mode B**: Multipole Corrector Subset Only | $11$ Multipoles of $\mathbf{K}_E\mathbf{s}+\mathbf{v}_{E,0}$ | $+27.51\%$ | $8.04\%$ | $16.40\%$ |
-| **Mode C**: Idealized Full 34-Basis Field Only | All $34$ Terms of $\mathbf{K}_E\mathbf{s}+\mathbf{v}_{E,0}$ | $+16.44\%$ | $3.74\%$ | $17.60\%$ |
-| **Mode D**: Full 34-Basis + $\dot{s}_{200}$ Damper | $\mathbf{K}_E\mathbf{s}+\mathbf{v}_{E,0}$ + $\Delta s_{200},\Delta s_{020}$ | **$+7.00\%$ ($5.8\times$ lower)** | **$4.11\%$ ($4.0\times$ lower)** | **$12.20\%$ ($2.4\times$ lower)** |
+| Ablation Mode (Identical $t=0$ State, Seed 42) | Controller Operator | Max Net Self-Force | RMS Emittance Growth | RMS Envelope Mismatch | High-Action Halo ($J_\perp > 3.5\sigma_0^2$) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Mode A**: Open-Loop Uncompensated | None ($\mathbf{v}_E = \mathbf{0}$) | $0.00$ | $+40.65\%$ | $16.60\%$ | $29.60\%$ |
+| **Mode B**: Multipole Subset (Uncorrected) | $11$ Terms of $\mathbf{v}_E^{\mathrm{prior}}$ | $0.1658$ | $+27.51\%$ | $8.04\%$ | $16.40\%$ |
+| **Mode B-ZSF**: Multipole Subset + ZSF Gauge | $11$ Terms of $\mathbf{v}_E^{\mathrm{ZSF}}$ | $9.24 \times 10^{-17}$ | $+16.64\%$ | $6.85\%$ | $17.60\%$ |
+| **Mode C**: Full 34-Basis (Uncorrected) | All $34$ Terms of $\mathbf{v}_E^{\mathrm{prior}}$ | $0.1658$ | $+16.44\%$ | $3.74\%$ | $17.60\%$ |
+| **Mode C-ZSF**: Full 34-Basis + ZSF Gauge | All $34$ Terms of $\mathbf{v}_E^{\mathrm{ZSF}}$ | $9.24 \times 10^{-17}$ | $+11.90\%$ | $3.87\%$ | $15.00\%$ |
+| **Mode D**: Full 34-Basis + $\dot{s}_{200}$ Damper | $\mathbf{v}_E^{\mathrm{prior}}$ + $\Delta s_{200},\Delta s_{020}$ | $0.1658$ | $+7.00\%$ | $4.11\%$ | $12.20\%$ |
+| **Mode D-ZSF**: Full 34-Basis + Damper + ZSF | $\mathbf{v}_E^{\mathrm{ZSF}}$ + $\Delta s_{200},\Delta s_{020}$ | **$9.24 \times 10^{-17}$** | **$+8.62\%$ ($4.7\times$ lower)** | **$4.20\%$ ($4.0\times$ lower)** | **$10.00\%$ ($3.0\times$ lower)** |
+
+- **4-Seed Statistical Robustness ($\mathrm{seed} \in \{42, 1, 7, 99\}$, Mean $\pm$ Sample SD $\mathrm{ddof}=1$)**:
+  - **Mode A**: $\{+40.65\%, +53.20\%, +60.85\%, +46.37\%\} \implies +50.27\% \pm 8.72\%$ ($\mathrm{pop.\ SD} = 7.55\%$)
+  - **Mode B**: $\{+27.51\%, +19.68\%, +21.32\%, +19.03\%\} \implies +21.88\% \pm 3.87\%$ ($\mathrm{pop.\ SD} = 3.35\%$)
+  - **Mode C**: $\{+16.44\%, +17.53\%, +22.03\%, +14.26\%\} \implies +17.56\% \pm 3.27\%$ ($\mathrm{pop.\ SD} = 2.83\%$)
+  - **Mode D**: $\{+7.00\%, +8.76\%, +10.86\%, +3.16\%\} \implies +7.44\% \pm 3.26\%$ ($\mathrm{pop.\ SD} = 2.83\%$)
+  - **Mode D-ZSF**: $\{+8.62\%, +11.90\%, +6.09\%, +4.01\%\} \implies +7.65\% \pm 3.40\%$ ($\mathrm{pop.\ SD} = 2.94\%$)
 
 ---
 
-## 2. Quick Start & Verification
+## 2. Quick Start & Verification (Supports Both Repository Tree & Flat-Folder Execution)
 
 ```bash
 python3 Test/benchmark_accelerator_space_charge.py
+# Or when both .py files are placed in the same flat directory:
+python3 benchmark_accelerator_space_charge.py
 ```

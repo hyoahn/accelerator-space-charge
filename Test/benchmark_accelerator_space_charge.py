@@ -25,12 +25,14 @@ Verifies:
        uncorrected net force on perturbed state a (||<E^{prior}>_a||_inf = 0.1123)
      - Runtime ZSF Dipolar Gauge Projection restoring ||<E^{ZSF}>_a||_inf ~ 10^-16 on a!
      - Interior beam-core multipole gradient accuracy (R^2 = 0.8962, RMS relative error = 32.22%)
-  5. Non-Circular 6D Phase-Space (x,px,y,py,z,pz) Pairwise-Coulomb Tracking & Ablation Study
-     (identical initial conditions, independent O(N_p^2) 3D Plummer-Coulomb space-charge
-     disturbance, pure unmodified polynomial gradient feedback with zero clip and zero taper)
+  5. Non-Circular 2D Transverse (x,px,y,py) Leapfrog Tracking in 3D Pairwise-Coulomb Geometry
+     & Ablation Study (identical initial conditions, independent O(N_p^2) 3D Plummer-Coulomb
+     space-charge disturbance, aperture-regularized polynomial feedback with and without ZSF
+     dipolar gauge projection, plus 4-seed statistical robustness verification)
 """
 
 from dataclasses import dataclass
+import importlib.util
 from pathlib import Path
 import sys
 import time
@@ -39,14 +41,36 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+for _p in (CURRENT_DIR, PROJECT_ROOT):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
-from Core.accelerator_space_charge_engine import (
-    AcceleratorSpaceChargeConfig,
-    AcceleratorSpaceChargeEngine,
-)
+try:
+    from Core.accelerator_space_charge_engine import (
+        AcceleratorSpaceChargeConfig,
+        AcceleratorSpaceChargeEngine,
+    )
+except ModuleNotFoundError:
+    try:
+        from accelerator_space_charge_engine import (
+            AcceleratorSpaceChargeConfig,
+            AcceleratorSpaceChargeEngine,
+        )
+    except ModuleNotFoundError:
+        _candidates = sorted(CURRENT_DIR.glob("accelerator_space_charge_engine*.py"))
+        if not _candidates:
+            raise
+        _spec = importlib.util.spec_from_file_location(
+            "accelerator_space_charge_engine", _candidates[-1]
+        )
+        assert _spec is not None and _spec.loader is not None
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["accelerator_space_charge_engine"] = _mod
+        _spec.loader.exec_module(_mod)
+        AcceleratorSpaceChargeConfig = _mod.AcceleratorSpaceChargeConfig
+        AcceleratorSpaceChargeEngine = _mod.AcceleratorSpaceChargeEngine
 
 
 @dataclass(frozen=True)
@@ -265,15 +289,24 @@ def run_accelerator_benchmark(
     print(f"    - Mode B (Pure Moment Dipole+Quad+Oct Correctors Only) : dEps = +{tracking['emittance_growth_multipole_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_pct']:.2f}%")
     print(f"    - Mode C (Pure Moment Full 34-Basis Field Only)        : dEps = +{tracking['emittance_growth_full34_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_pct']:.2f}%")
     print(f"    - Mode D (Full 34-Basis Moment + ds_200/dt Damper)     : dEps = +{tracking['emittance_growth_ctrl_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_pct']:.2f}%")
+    print(f"    - Mode B-ZSF (Multipole Correctors + ZSF Gauge)        : dEps = +{tracking['emittance_growth_multipole_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_zsf_pct']:.2f}%")
+    print(f"    - Mode C-ZSF (Full 34-Basis Field + ZSF Gauge)         : dEps = +{tracking['emittance_growth_full34_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_zsf_pct']:.2f}%")
+    print(f"    - Mode D-ZSF (Full 34-Basis + Damper + ZSF Gauge)      : dEps = +{tracking['emittance_growth_ctrl_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_zsf_pct']:.2f}%")
+    print(f"    - Max Polynomial Self-Force (Uncorrected vs ZSF)       : {tracking['max_poly_selfforce_uncorr']:.4f} -> {tracking['max_poly_selfforce_zsf']:.2e}")
+    print(f"    - Max Applied Particle Net Kick (Uncorrected vs ZSF)   : {tracking['max_applied_selfforce_uncorr']:.4f} -> {tracking['max_applied_selfforce_zsf']:.2e}")
     assert tracking["emittance_growth_multipole_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["emittance_growth_full34_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["emittance_growth_ctrl_pct"] < tracking["emittance_growth_uncomp_pct"]
+    assert tracking["emittance_growth_ctrl_zsf_pct"] < tracking["emittance_growth_uncomp_pct"]
+    assert tracking["max_poly_selfforce_zsf"] < spec.numerical_tolerance
+    assert tracking["max_applied_selfforce_zsf"] < spec.numerical_tolerance
 
     # 5. Active Multipole Space-Charge Compensation & Compute Kernel Latency
     kick_res = engine.execute_realtime_bpm_multipole_control(s_bpm)
-    bench = engine.benchmark_accelerator_loop()
+    bench = engine.benchmark_accelerator_loop(s_input=s_bpm)
     pot_us = bench["avg_potential_latency_us"]
     field_us = bench["avg_3d_field_latency_us"]
+    field_zsf_us = bench["avg_3d_field_zsf_latency_us"]
     deadline_us = config.revolution_deadline_us
 
     print(f"\n[7] Active Multipole Synthesis & Compute Kernel Latency ({config.benchmark_iterations:,} runs):")
@@ -281,6 +314,7 @@ def run_accelerator_benchmark(
     print(f"    - Compensating Quadrupole Trims (xx,yy,zz) : {np.round(kick_res['quadrupole_trims'], 6)}")
     print(f"    - 35x35 Potential Kernel Compute Latency   : {pot_us:.3f} µs")
     print(f"    - 34x35 3D E-Field Kernel Compute Latency  : {field_us:.3f} µs")
+    print(f"    - 34x35 E-Field + ZSF Gauge Compute Latency: {field_zsf_us:.3f} µs")
     print(f"    - 5-Turn Ring Control Window ({deadline_us:.1f} µs) Ratio : {deadline_us / field_us:.2f}x")
 
     # 6. Generate Dedicated Accelerator Publication Figure (400 DPI)
