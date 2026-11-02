@@ -1,38 +1,41 @@
 r"""
-High-Intensity Particle Accelerator 3D Space-Charge & Active Multipole Control Engine
-=====================================================================================
+High-Intensity Particle Accelerator 3D Space-Charge Moment Reduction Engine
+===========================================================================
 Originator & Author: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
 Companion Code for Paper:
-  "Microsecond Active Mitigation of Space-Charge Instabilities in High-Intensity
-   Hadron Rings via Closed-Form Moment Invariants" (doc/arXiv/Accelerator/accelerator_space_charge.tex)
+  "Closed-Form Moment Reduction of 3D Space-Charge Fields for Fast Feedback
+   in High-Intensity Hadron Rings" (doc/arXiv/Accelerator/accelerator_space_charge.tex)
 Theoretical Foundation: Dr. Hyo Eun Ahn's 1994 LANL Archival Derivations:
   - report1.pdf  (April 4, 1994: BEDLAM 4th-Order Space-Charge Model Study)
   - poly-phi.pdf (1994: Polynomial Approximation to the Space-Charge Potential)
   - poly-e.pdf   (1994: Polynomial Approximation to the Space-Charge Field)
 Architecture: Domain-Driven Design (DDD) & Zero Hard-Coding (GR2 Compliant)
 
-Key Mathematical Theorems for High-Intensity Hadron Rings (LANL PSR / ORNL SNS / CERN PSB):
--------------------------------------------------------------------------------------------
+Key Mathematical Formulations (1994 LANL Theory + 2026 Numerical Verification):
+-------------------------------------------------------------------------------
 1. Theorem 1 (report1.pdf): Underdetermined 3D Bunch Charge Inversion with Normalized Prior
      a = \Lambda s + c,   \Lambda = \Omega^T (\Omega \Omega^T)^{-1},   c = [I_N - \Lambda \Omega] \mu
-   Enforcing \sum_{i=1}^N \mu_i = 1 with matched second moments guarantees a \equiv \mu > 0 at
-   the reference equilibrium and suppresses fringe negative-charge overshoot by >3x under finite
-   moment perturbations compared to Channell's uniform/zero prior.
+   Assuming rank(\Omega) = M = 35, enforcing \sum_{i=1}^N \mu_i = 1 with matched second moments
+   guarantees a \equiv \mu > 0 at the reference equilibrium (s = \Omega \mu) and suppresses
+   fringe negative-charge overshoot by >3x under finite perturbations compared to Channell's
+   uniform/zero prior.
 
 2. Theorem 2 (poly-phi.pdf): Closed-Form 35x35 Space-Charge Potential Reduction
      v = K s + v_0,   K = \Lambda'^T(\mu) D \Lambda \in R^{35 \times 35},   v_0 = \Lambda'^T(\mu) D c \in R^{35}
-   where \Lambda'^T(\mu) = [{\Omega \mu} \Omega^T]^{-1} {\Omega \mu}.
-   Eliminates the N-point mesh at runtime and preserves all 35 weighted potential averages:
+   Provides an exact reduced-order representation of the \mu-weighted projected potential,
+   eliminating the N-point mesh at runtime and preserving all 35 weighted potential moments:
      <m_k \phi^{approx}>_w = <m_k \phi^{exact}>_w   (k = 1..35).
 
-3. Theorem 3 (poly-e.pdf): Direct 3D Vector Electric Field Fit & Average Force Preservation
-     \sum_{j=1}^3 {\tilde{\Omega}^{x_j} w} \tilde{\Omega}^{x_j T} v_E
-       = -\sum_{j=1}^3 {\tilde{\Omega}^{x_j} w} E_{x_j}^{exact}
-   Preserves all 34 generalized field averages (Eq. 27 of poly-e.pdf), guaranteeing the
-   Average Force Preservation Property:
-     <E_x^{approx}> = <E_x^{exact}>,  <E_y^{approx}> = <E_y^{exact}>,  <E_z^{approx}> = <E_z^{exact}>.
-   Runtime 34x35 operator v_E = K_E s + v_E0 drives active Kicker/Quadrupole/Octupole
-   corrector magnets from BPM/envelope bunch moments in < 5 microseconds.
+3. Theorem 3 (poly-e.pdf) & Runtime Zero-Self-Force (ZSF) Dipolar Gauge Projection:
+   - State-weighted fit (w = a): preserves all 34 generalized field averages and guarantees
+     exact zero self-force <E^{approx}(a)>_a = <E^{exact}>_a = 0 via antisymmetry G_{ik} = -G_{ki}.
+   - Prior-weighted runtime operator (w = \mu): v_E^{prior} = K_E s + v_E0 preserves the
+     \mu-weighted field moments <E^{approx}>_\mu = <E^{exact}>_\mu, which leaves a non-zero
+     net force <E^{approx}>_a = \mu^T G \delta a != 0 on perturbed states a = \mu + \delta a.
+   - Exact Moment-Space ZSF Gauge Projection: Because \partial \tilde{m}_l / \partial x_j is a
+     monomial of degree <= 3, <E_{x_j}^{approx}>_a = -v_E^T (D_{x_j}^{mom} s) depends purely on
+     s \in R^{35}. Shifting the 3 dipolar components (v_{E,x}, v_{E,y}, v_{E,z}) enforces
+     exact zero net self-force <E^{ZSF}>_a == 0 to machine precision (~10^-16) in O(M_E) time!
 """
 
 from dataclasses import dataclass
@@ -75,8 +78,10 @@ class AcceleratorSpaceChargeConfig:
     tracking_num_turns: int = 80
     tracking_substeps_per_turn: int = 4
     tracking_seed: int = 42
+    multi_seeds: Tuple[int, ...] = (42, 1, 7, 99, 2026)
     bare_tune_qx: float = 6.23
     bare_tune_qy: float = 6.20
+    synchrotron_tune_qz: float = 0.008
     initial_envelope_mismatch: float = 0.18
     space_charge_lambda_scale: float = 0.80
 
@@ -110,6 +115,20 @@ class BeamMonomialBasis3D:
         ]
         self.M_field: int = len(self.non_constant_indices)
 
+        # Build exact algebraic derivative maps D_x, D_y, D_z in moment space (34 x 35)
+        # such that \tilde{\Omega}^{x_j} == D_{x_j}^{mom} @ \Omega identically!
+        self.D_mom_x = np.zeros((self.M_field, self.M), dtype=np.float64)
+        self.D_mom_y = np.zeros((self.M_field, self.M), dtype=np.float64)
+        self.D_mom_z = np.zeros((self.M_field, self.M), dtype=np.float64)
+        for pos, idx in enumerate(self.non_constant_indices):
+            p, q, l = self.monomials[idx]
+            if p > 0:
+                self.D_mom_x[pos, self._index_map[(p - 1, q, l)]] = float(p)
+            if q > 0:
+                self.D_mom_y[pos, self._index_map[(p, q - 1, l)]] = float(q)
+            if l > 0:
+                self.D_mom_z[pos, self._index_map[(p, q, l - 1)]] = float(l)
+
     def get_index(self, exponents: Tuple[int, int, int]) -> int:
         """Dynamically resolves the basis index for exponent tuple (p, q, l)."""
         if exponents not in self._index_map:
@@ -131,7 +150,6 @@ class BeamMonomialBasis3D:
         self, bunch_coords: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Evaluates partial derivatives (d/dx, d/dy, d/dz) of all M monomials -> shape (M, N)."""
-        N = bunch_coords.shape[0]
         x = bunch_coords[:, 0]
         y = bunch_coords[:, 1]
         z = bunch_coords[:, 2]
@@ -157,9 +175,8 @@ class BeamMonomialBasis3D:
 class AcceleratorSpaceChargeEngine:
     """
     Dedicated Real-Time Accelerator Space-Charge & Active Multipole Control Engine.
-    Implements Dr. Ahn's 1994 LANL equations (report1, poly-phi, poly-e) for microsecond
-    space-charge instability suppression in high-intensity hadron injectors, accumulator
-    rings, and booster synchrotrons.
+    Implements Dr. Ahn's 1994 LANL equations (report1, poly-phi, poly-e) and the 2026
+    Zero-Self-Force (ZSF) Dipolar Gauge Projection for high-intensity hadron rings.
     """
 
     def __init__(
@@ -183,8 +200,14 @@ class AcceleratorSpaceChargeEngine:
         # 1. Normalized Bunch Reference Distribution mu: sum(mu_i) = 1 (report1.pdf)
         self.mu = self._initialize_bunch_prior(reference_prior_mu)
 
-        # 2. Evaluate basis matrix Omega (35 x N) and non-constant derivatives (34 x N)
+        # 2. Evaluate basis matrix Omega (35 x N) and verify full row rank = 35
         self.Omega = self.basis.evaluate(self.r)
+        self.omega_rank: int = int(np.linalg.matrix_rank(self.Omega))
+        if self.omega_rank < self.M:
+            raise ValueError(
+                f"Degenerate mesh: rank(Omega) = {self.omega_rank} < M = {self.M}."
+            )
+
         self.Omega_x, self.Omega_y, self.Omega_z = self.basis.evaluate_derivatives(self.r)
 
         nc = self.basis.non_constant_indices
@@ -197,8 +220,8 @@ class AcceleratorSpaceChargeEngine:
         self.D, self.G_x, self.G_y, self.G_z = self._build_coulomb_kernels(self.r)
 
         # 4. Precompute 35x35 potential operator (K, v_0) and 34x35 field operator (K_E, v_E0)
-        self._precompute_space_charge_operators()
         self._setup_multipole_indices()
+        self._precompute_space_charge_operators()
 
     def compute_beam_physics_parameters(self) -> Dict[str, float]:
         """
@@ -270,6 +293,44 @@ class AcceleratorSpaceChargeEngine:
 
         return D, G_x, G_y, G_z
 
+    def _setup_multipole_indices(self) -> None:
+        """Resolves non-constant monomial indices for Dipole, Quadrupole, and Octupole kicks."""
+        nc = self.basis.non_constant_indices
+        nc_pos = {mon_idx: pos for pos, mon_idx in enumerate(nc)}
+
+        self.kick_scale = (
+            self.config.active_compensation_gain
+            * self.config.corrector_magnet_length_m
+            / self.config.beam_rigidity_brho_tm
+        )
+
+        self.dipole_indices = [
+            nc_pos[self.basis.get_index((1, 0, 0))],
+            nc_pos[self.basis.get_index((0, 1, 0))],
+            nc_pos[self.basis.get_index((0, 0, 1))],
+        ]
+        self.higher_order_field_indices = [
+            pos for pos in range(self.M_field) if pos not in self.dipole_indices
+        ]
+        self.quadrupole_indices = [
+            nc_pos[self.basis.get_index((2, 0, 0))],
+            nc_pos[self.basis.get_index((0, 2, 0))],
+            nc_pos[self.basis.get_index((0, 0, 2))],
+        ]
+        self.octupole_indices = [
+            nc_pos[self.basis.get_index((4, 0, 0))],
+            nc_pos[self.basis.get_index((0, 4, 0))],
+            nc_pos[self.basis.get_index((0, 0, 4))],
+        ]
+        multipole_exps = [
+            (1, 0, 0), (0, 1, 0), (0, 0, 1),
+            (2, 0, 0), (1, 1, 0), (0, 2, 0), (0, 0, 2),
+            (4, 0, 0), (2, 2, 0), (0, 4, 0), (0, 0, 4),
+        ]
+        self.multipole_subset_indices = [
+            nc_pos[self.basis.get_index(exp)] for exp in multipole_exps
+        ]
+
     def _precompute_space_charge_operators(self) -> None:
         """
         Precomputes all offline matrices from poly-phi.pdf and poly-e.pdf using the
@@ -312,42 +373,6 @@ class AcceleratorSpaceChargeEngine:
 
         self.precompute_time_sec = time.perf_counter() - t0
 
-    def _setup_multipole_indices(self) -> None:
-        """Resolves non-constant monomial indices for Dipole, Quadrupole, and Octupole kicks."""
-        nc = self.basis.non_constant_indices
-        nc_pos = {mon_idx: pos for pos, mon_idx in enumerate(nc)}
-
-        self.kick_scale = (
-            self.config.active_compensation_gain
-            * self.config.corrector_magnet_length_m
-            / self.config.beam_rigidity_brho_tm
-        )
-
-        self.dipole_indices = [
-            nc_pos[self.basis.get_index((1, 0, 0))],
-            nc_pos[self.basis.get_index((0, 1, 0))],
-            nc_pos[self.basis.get_index((0, 0, 1))],
-        ]
-        self.quadrupole_indices = [
-            nc_pos[self.basis.get_index((2, 0, 0))],
-            nc_pos[self.basis.get_index((0, 2, 0))],
-            nc_pos[self.basis.get_index((0, 0, 2))],
-        ]
-        self.octupole_indices = [
-            nc_pos[self.basis.get_index((4, 0, 0))],
-            nc_pos[self.basis.get_index((0, 4, 0))],
-            nc_pos[self.basis.get_index((0, 0, 4))],
-        ]
-        # Transverse multipole subset (orders 1, 2, 4 in x, y, z)
-        multipole_exps = [
-            (1, 0, 0), (0, 1, 0), (0, 0, 1),
-            (2, 0, 0), (1, 1, 0), (0, 2, 0), (0, 0, 2),
-            (4, 0, 0), (2, 2, 0), (0, 4, 0), (0, 0, 4),
-        ]
-        self.multipole_subset_indices = [
-            nc_pos[self.basis.get_index(exp)] for exp in multipole_exps
-        ]
-
     def compute_bunch_moments(self, bunch_charges: np.ndarray) -> np.ndarray:
         """Computes M=35 spatial beam moments from bunch charge distribution: s = Omega * a."""
         return self.Omega @ bunch_charges
@@ -363,12 +388,40 @@ class AcceleratorSpaceChargeEngine:
         """
         return self.K @ s + self.v_0
 
-    def runtime_electric_field_coefficients(self, s: np.ndarray) -> np.ndarray:
+    def runtime_electric_field_coefficients(
+        self, s: np.ndarray, enforce_zero_self_force: bool = False
+    ) -> np.ndarray:
         """
         REAL-TIME 34x35 3D SPACE-CHARGE ELECTRIC FIELD REDUCTION (poly-e.pdf Eq. 11):
             v_E = K_E s + v_E0
+        If enforce_zero_self_force=True, applies the exact O(M_E) Moment-Space Dipolar
+        Gauge Projection so that <E^{approx}>_a == 0 holds to machine precision (~10^-16)
+        on the instantaneous distribution a with moments s = Omega * a.
         """
-        return self.K_E @ s + self.v_E0
+        v_E = self.K_E @ s + self.v_E0
+        if not enforce_zero_self_force:
+            return v_E
+        return self.apply_zero_self_force_gauge(v_E, s)
+
+    def apply_zero_self_force_gauge(self, v_E: np.ndarray, s: np.ndarray) -> np.ndarray:
+        r"""
+        Applies the exact Moment-Space Dipolar Gauge Projection:
+            v_{E, x_j}^{ZSF} = -(1 / s_000) sum_{l in higher_order} v_{E,l} (D_{x_j}^{mom} s)_l
+        Because \tilde{\Omega}^{x_j} a == D_{x_j}^{mom} (\Omega a) == D_{x_j}^{mom} s, this
+        adjusts only the 3 constant dipolar field offsets (x, y, z) to guarantee
+        <E^{approx}>_a == 0 to machine precision without touching any higher-order multipole!
+        """
+        v_zsf = v_E.copy()
+        s000 = float(s[0]) if abs(float(s[0])) > 1e-15 else 1.0
+        ho = self.higher_order_field_indices
+        dx_s = self.basis.D_mom_x[ho, :] @ s
+        dy_s = self.basis.D_mom_y[ho, :] @ s
+        dz_s = self.basis.D_mom_z[ho, :] @ s
+
+        v_zsf[self.dipole_indices[0]] = -float(np.dot(v_zsf[ho], dx_s)) / s000
+        v_zsf[self.dipole_indices[1]] = -float(np.dot(v_zsf[ho], dy_s)) / s000
+        v_zsf[self.dipole_indices[2]] = -float(np.dot(v_zsf[ho], dz_s)) / s000
+        return v_zsf
 
     def verify_potential_averages_theorem(self, bunch_charges: np.ndarray) -> Dict[str, np.ndarray]:
         """
@@ -390,18 +443,25 @@ class AcceleratorSpaceChargeEngine:
 
     def verify_electric_field_and_average_force_theorem(
         self, bunch_charges: np.ndarray
-    ) -> Dict[str, np.ndarray]:
-        """
-        Verifies Dr. Ahn's Direct 3D Electric Field Fit & Average Force Preservation Property
-        (poly-e.pdf Eq. 11 & Eq. 27):
-          1. All 34 generalized field averages match identically:
-             sum_j < (dm_k/dx_j) E_{x_j}^{approx} > = sum_j < (dm_k/dx_j) E_{x_j}^{exact} >
-          2. Average Force Preservation (<E^{approx}> = <E^{exact}>) holds to machine precision.
+    ) -> Dict[str, np.ndarray | float]:
+        r"""
+        Verifies and distinguishes ALL THREE formulations of Theorem 3 (poly-e.pdf):
+          1. State-Weighted Projection (w = a):
+             Preserves all 34 a-weighted field moments and <E^{approx}(a)>_a = <E^{exact}>_a = 0.
+          2. Prior-Weighted Runtime Operator (w = \mu, uncorrected):
+             v_E^{prior} = K_E s + v_E0 preserves the 34 \mu-weighted field moments
+             <E^{approx}(\mu)>_\mu = <E^{exact}>_\mu, while yielding a non-zero net force
+             <E^{approx}(\mu)>_a = \mu^T G \delta a != 0 on the perturbed state a.
+          3. Prior-Weighted Runtime Operator with ZSF Dipolar Gauge Projection (w = \mu + ZSF):
+             Restores exact zero net self-force <E^{ZSF}(\mu)>_a == 0 on the instantaneous
+             state a to machine precision (~10^-16) while preserving all 31 higher-order
+             multipole coefficients (orders 2..4) of v_E^{prior}!
         """
         Ex_exact = self.G_x @ bunch_charges
         Ey_exact = self.G_y @ bunch_charges
         Ez_exact = self.G_z @ bunch_charges
 
+        # 1. State-weighted fit (w = a)
         Ox_a = self.Omega_x_nc * bunch_charges[np.newaxis, :]
         Oy_a = self.Omega_y_nc * bunch_charges[np.newaxis, :]
         Oz_a = self.Omega_z_nc * bunch_charges[np.newaxis, :]
@@ -425,18 +485,63 @@ class AcceleratorSpaceChargeEngine:
             float(np.sum(bunch_charges * Ey_exact)),
             float(np.sum(bunch_charges * Ez_exact)),
         ])
-        avg_force_approx = np.array([
+        avg_force_approx_state = np.array([
             float(np.sum(bunch_charges * Ex_approx)),
             float(np.sum(bunch_charges * Ey_approx)),
             float(np.sum(bunch_charges * Ez_approx)),
         ])
 
+        # 2. Prior-weighted runtime operator (w = mu) on reconstructed/true moments s
+        s_true = self.compute_bunch_moments(bunch_charges)
+        v_E_prior = self.runtime_electric_field_coefficients(s_true, enforce_zero_self_force=False)
+        Ex_prior = -(self.Omega_x_nc.T @ v_E_prior)
+        Ey_prior = -(self.Omega_y_nc.T @ v_E_prior)
+        Ez_prior = -(self.Omega_z_nc.T @ v_E_prior)
+
+        # Verify mu-weighted conservation on reconstructed charge a_recon = Lambda s + c
+        a_recon = self.runtime_reconstruct_bunch_charges(s_true)
+        Ex_rec_exact = self.G_x @ a_recon
+        Ey_rec_exact = self.G_y @ a_recon
+        Ez_rec_exact = self.G_z @ a_recon
+        avg_force_mu_exact = np.array([
+            float(np.sum(self.mu * Ex_rec_exact)),
+            float(np.sum(self.mu * Ey_rec_exact)),
+            float(np.sum(self.mu * Ez_rec_exact)),
+        ])
+        avg_force_mu_prior = np.array([
+            float(np.sum(self.mu * Ex_prior)),
+            float(np.sum(self.mu * Ey_prior)),
+            float(np.sum(self.mu * Ez_prior)),
+        ])
+        avg_force_a_uncorrected_prior = np.array([
+            float(np.sum(bunch_charges * Ex_prior)),
+            float(np.sum(bunch_charges * Ey_prior)),
+            float(np.sum(bunch_charges * Ez_prior)),
+        ])
+
+        # 3. Runtime operator with Moment-Space ZSF Dipolar Gauge Projection
+        v_E_zsf = self.runtime_electric_field_coefficients(s_true, enforce_zero_self_force=True)
+        Ex_zsf = -(self.Omega_x_nc.T @ v_E_zsf)
+        Ey_zsf = -(self.Omega_y_nc.T @ v_E_zsf)
+        Ez_zsf = -(self.Omega_z_nc.T @ v_E_zsf)
+        avg_force_a_zsf = np.array([
+            float(np.sum(bunch_charges * Ex_zsf)),
+            float(np.sum(bunch_charges * Ey_zsf)),
+            float(np.sum(bunch_charges * Ez_zsf)),
+        ])
+
         return {
             "v_E": v_E,
+            "v_E_prior": v_E_prior,
+            "v_E_zsf": v_E_zsf,
             "exact_field_averages_34": exact_field_averages_34,
             "approx_field_averages_34": approx_field_averages_34,
             "avg_force_exact": avg_force_exact,
-            "avg_force_approx": avg_force_approx,
+            "avg_force_approx": avg_force_approx_state,
+            "avg_force_mu_exact": avg_force_mu_exact,
+            "avg_force_mu_prior": avg_force_mu_prior,
+            "avg_force_a_uncorrected_prior": avg_force_a_uncorrected_prior,
+            "avg_force_a_zsf": avg_force_a_zsf,
         }
 
     def evaluate_prior_linearization_and_core_fidelity(
@@ -453,7 +558,7 @@ class AcceleratorSpaceChargeEngine:
         v_E_state = field_thm["v_E"]
 
         s_true = self.compute_bunch_moments(bunch_charges)
-        v_E_prior = self.runtime_electric_field_coefficients(s_true)
+        v_E_prior = self.runtime_electric_field_coefficients(s_true, enforce_zero_self_force=True)
 
         quad_state = v_E_state[self.quadrupole_indices]
         quad_prior = v_E_prior[self.quadrupole_indices]
@@ -500,11 +605,13 @@ class AcceleratorSpaceChargeEngine:
     ) -> Dict[str, np.ndarray | float]:
         """
         Executes a single-turn accelerator active space-charge feedback step (< 5 microseconds):
-          - Maps BPM/envelope moment vector s (35,) -> 3D field coefficients v_E (34,)
+          - Maps BPM/envelope moment vector s (35,) -> ZSF-projected 3D field coefficients v_E (34,)
           - Computes compensating Dipole Kicker, Quadrupole Trim, and Octupole Landau strengths
         """
         t0 = time.perf_counter()
-        v_E = self.K_E @ bpm_moments_s + self.v_E0
+        v_E = self.runtime_electric_field_coefficients(
+            bpm_moments_s, enforce_zero_self_force=True
+        )
         dipole_kicks = self.kick_scale * v_E[self.dipole_indices]
         quadrupole_trims = 2.0 * self.kick_scale * v_E[self.quadrupole_indices]
         octupole_trims = 4.0 * self.kick_scale * v_E[self.octupole_indices]
@@ -524,7 +631,8 @@ class AcceleratorSpaceChargeEngine:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Computes the exact self-consistent O(N_p^2) 3D Plummer-softened pairwise Coulomb
-        electric field (Ex, Ey) acting on N_p macro-particles:
+        transverse electric field (Ex, Ey) in the bunch co-moving frame acting on N_p
+        macro-particles:
             E_p = (1 / N_p) sum_{q != p} (r_p - r_q) / (|r_p - r_q|^2 + h^2)^(3/2).
         """
         n_p = coords.shape[0]
@@ -546,49 +654,40 @@ class AcceleratorSpaceChargeEngine:
         self,
         num_turns: Optional[int] = None,
         num_particles: Optional[int] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, float | np.ndarray | Dict[str, Dict[str, float]]]:
         """
-        Executes a rigorous, non-circular multi-turn 3D symplectic macro-particle tracking
-        and ablation study meeting all four peer-review criteria:
-          1. Identical Initial Conditions: All modes start from the exact same initial
-             macro-particle coordinates (x_0, px_0, y_0, py_0, z_0) with zero initial rescaling.
+        Executes a non-circular 2D transverse (x, px, y, py) Leapfrog macro-particle
+        tracking and 4-mode ablation study in a 3D bunch Coulomb geometry (with quasi-static
+        longitudinal coordinate z over 80 betatron turns, since T_synch >> 80 turns):
+          1. Identical Initial Conditions: All 4 modes start from the exact same initial
+             macro-particle coordinates (x_0, px_0, y_0, py_0, z_0) with zero rescaling.
           2. Independent Self-Consistent O(N_p^2) 3D Pairwise Plummer-Coulomb Disturbance:
-             At every symplectic substep, the physical space-charge kick is computed from
-             direct pairwise 3D Plummer-Coulomb summation over all N_p macro-particles,
-             calibrated at n=0 to the target Laslett tune shift Delta Q_sc (with scaling
-             lambda_sc = 0.80 to prevent integer tune resonance collapse).
+             At every Leapfrog substep, the physical space-charge kick is computed from
+             direct 3D pairwise Plummer-Coulomb summation over all N_p macro-particles.
           3. Pure Moment-Operator Feedback Controller (Zero Direct Disturbance Access):
-             The controller NEVER observes the pairwise Coulomb kicks. It measures only the
-             35 spatial moments s = (1/N_p) sum_p m(r_p), computes v_E = K_E s + v_E0 via the
-             precomputed 34x35 operator, and applies the resulting polynomial multipole field
-             E_approx(r) = -nabla(m^T v_E) as a Hamiltonian momentum kick.
-          4. Complete Ablation Study:
-             - Mode A ('open_loop'): Uncompensated pairwise 3D Coulomb space-charge only.
-             - Mode B ('moment_multipole_only'): Compensating kicks restricted to Dipole,
-               Quadrupole, and Octupole coefficients of v_E = K_E s + v_E0.
-             - Mode C ('moment_full34_only'): Compensating kicks using all 34 polynomial
-               coefficients of v_E = K_E s + v_E0 (pure static moment field cancellation).
-             - Mode D ('moment_full34_plus_damper'): Full 34-term moment operator v_E plus
-               turn-by-turn 2nd-moment rate (ds_200/dt, ds_020/dt) quadrupole envelope damper.
+             The controller NEVER observes Ex_true or Ey_true. It measures only the 35
+             spatial moments s = (1/N_p) sum_p m(r_p), computes v_E = K_E s + v_E0 via the
+             precomputed 34x35 operator, and applies the resulting aperture-regularized
+             polynomial field kick.
         """
         cfg = self.config
         n_turns = num_turns if num_turns is not None else cfg.tracking_num_turns
         n_part = num_particles if num_particles is not None else cfg.tracking_num_particles
         n_sub = cfg.tracking_substeps_per_turn
+        run_seed = seed if seed is not None else cfg.tracking_seed
         phys = self.compute_beam_physics_parameters()
         dq_sc = abs(phys["delta_q_sc"]) * cfg.space_charge_lambda_scale
 
-        # 1. Generate ONE shared initial 3D parabolic macro-particle distribution
-        # matching the physical beam scale R_b = 0.55 of report1.pdf Fig. 2
-        rng = np.random.default_rng(cfg.tracking_seed)
+        # 1. Generate ONE shared initial 3D parabolic macro-particle distribution (R_b = 0.55)
+        rng = np.random.default_rng(run_seed)
         r_b = 0.55
-        sigma0 = float(r_b / np.sqrt(7.0))  # Exact RMS of 3D parabolic sphere: R_b / sqrt(7)
+        sigma0 = float(r_b / np.sqrt(7.0))
         mismatch = cfg.initial_envelope_mismatch
         sx_scale = 1.0 + mismatch
         sy_scale = 1.0 - 0.8 * mismatch
         sz_scale = 1.0
 
-        # Rejection-sample exact 3D parabolic density rho(r) = max(0, 1 - r^2) in unit ball
         pts = []
         while len(pts) < n_part:
             cand = rng.uniform(-1.0, 1.0, (n_part * 3, 3))
@@ -605,15 +704,12 @@ class AcceleratorSpaceChargeEngine:
         raw_x = 0.015 + r_b * sx_scale * pts_arr[:, 0]
         raw_y = -0.012 + r_b * sy_scale * pts_arr[:, 1]
         raw_z = r_b * sz_scale * pts_arr[:, 2]
-        # Conjugate canonical momenta matched to bare betatron phase space (with mismatch)
-        raw_px = r_b * (pts_arr[:, 1] * 0.0 + rng.normal(0.0, sigma0 / sx_scale, n_part))
-        raw_py = r_b * (pts_arr[:, 0] * 0.0 + rng.normal(0.0, sigma0 / sy_scale, n_part))
+        _ = rng.normal(0.0, sigma0 / sx_scale, n_part)
+        _ = rng.normal(0.0, sigma0 / sy_scale, n_part)
         raw_px = rng.normal(0.0, sigma0 / sx_scale, n_part)
         raw_py = rng.normal(0.0, sigma0 / sy_scale, n_part)
 
         # Calibrate physical perveance kappa_sc from initial matched 3D pairwise Coulomb gradient
-        # Vlasov mean-field Plummer smoothing scale h_p = 1.6 * R_b * N_p^(-1/3) (~0.11)
-        # prevents artificial 2-body collisional scattering while preserving global space charge
         h_p = float(1.6 * r_b * np.cbrt(1.0 / n_part))
         matched_coords = np.column_stack([
             r_b * pts_arr[:, 0],
@@ -633,10 +729,13 @@ class AcceleratorSpaceChargeEngine:
         mean_grad0 = 0.5 * (grad_Ex0 + grad_Ey0)
         kappa_sc = (4.0 * np.pi * dq_sc) / mean_grad0
 
-        # Calibrate controller gain ratio between N_p macro-particle Plummer kernel (h_p)
-        # and the N-mesh operator K_E (softening_h) at the matched reference state (turn 0)
-        s0_matched = self.basis.evaluate(matched_coords) @ np.full(n_part, 1.0 / float(n_part))
-        vE0_matched = self.runtime_electric_field_coefficients(s0_matched)
+        # Calibrate fixed t=0 reference gradient ratio between N_p Plummer kernel (h_p)
+        # and the N-mesh operator K_E (softening_h)
+        w_p = np.full(n_part, 1.0 / float(n_part), dtype=np.float64)
+        s0_matched = self.basis.evaluate(matched_coords) @ w_p
+        vE0_matched = self.runtime_electric_field_coefficients(
+            s0_matched, enforce_zero_self_force=False
+        )
         Ox0, Oy0, _ = self.basis.evaluate_derivatives(matched_coords)
         nc = self.basis.non_constant_indices
         Ex0_model = -(Ox0[nc, :].T @ vE0_matched)
@@ -645,7 +744,6 @@ class AcceleratorSpaceChargeEngine:
             / np.sum(matched_coords[core_sel, 0] ** 2)
         )
         kernel_scale_ratio = mean_grad0 / grad_Ex0_model
-        w_p = np.full(n_part, 1.0 / float(n_part), dtype=np.float64)
 
         def _calc_rms_emittance(u: np.ndarray, pu: np.ndarray) -> float:
             u_c = u - np.mean(u)
@@ -656,7 +754,6 @@ class AcceleratorSpaceChargeEngine:
             return float(np.sqrt(max(1e-16, u2 * pu2 - upu ** 2)))
 
         def _run_mode(mode: str) -> Dict[str, float | np.ndarray]:
-            # Strictly identical initial state for every mode!
             x = raw_x.copy()
             px = raw_px.copy()
             y = raw_y.copy()
@@ -665,8 +762,8 @@ class AcceleratorSpaceChargeEngine:
 
             dtheta_x = (2.0 * np.pi * cfg.bare_tune_qx) / float(n_sub)
             dtheta_y = (2.0 * np.pi * cfg.bare_tune_qy) / float(n_sub)
-            cos_half_x, sin_half_x = float(np.cos(0.5 * dtheta_x)), float(np.sin(0.5 * dtheta_x))
-            cos_half_y, sin_half_y = float(np.cos(0.5 * dtheta_y)), float(np.sin(0.5 * dtheta_y))
+            chx, shx = float(np.cos(0.5 * dtheta_x)), float(np.sin(0.5 * dtheta_x))
+            chy, shy = float(np.cos(0.5 * dtheta_y)), float(np.sin(0.5 * dtheta_y))
             dt_kick = 1.0 / float(n_sub)
 
             emittance_hist = np.zeros(n_turns + 1, dtype=np.float64)
@@ -684,13 +781,10 @@ class AcceleratorSpaceChargeEngine:
             for turn in range(1, n_turns + 1):
                 for _ in range(n_sub):
                     # 1. Symplectic Half-Drift (Linear Betatron Rotation)
-                    x_h = cos_half_x * x + sin_half_x * px
-                    px_h = -sin_half_x * x + cos_half_x * px
-                    y_h = cos_half_y * y + sin_half_y * py
-                    py_h = -sin_half_y * y + cos_half_y * py
-                    x, px, y, py = x_h, px_h, y_h, py_h
+                    x, px = chx * x + shx * px, -shx * x + chx * px
+                    y, py = chy * y + shy * py, -shy * y + chy * py
 
-                    # 2. Independent Self-Consistent O(N_p^2) Pairwise 3D Coulomb Kick
+                    # 2. Independent Self-Consistent O(N_p^2) 3D Pairwise Plummer-Coulomb Kick
                     coords = np.column_stack([x, y, z])
                     Ex_true, Ey_true = self._compute_pairwise_3d_coulomb_field(coords, h_p)
                     px += dt_kick * kappa_sc * Ex_true
@@ -698,14 +792,16 @@ class AcceleratorSpaceChargeEngine:
 
                     # 3. Pure Moment-Operator Feedback Controller (NEVER sees Ex_true, Ey_true)
                     if mode != "open_loop":
-                        # Normalize particle coordinates to the reference prior radius before
-                        # evaluating the polynomial basis if particles expand, preventing r^3 runaway
                         r_p = np.linalg.norm(coords, axis=1)
-                        core_weight = np.exp(-0.5 * np.maximum(0.0, (r_p - r_b) / (0.25 * r_b)) ** 2)
+                        core_weight = np.exp(
+                            -0.5 * np.maximum(0.0, (r_p - r_b) / (0.25 * r_b)) ** 2
+                        )
                         coords_eval = np.clip(coords, -r_b * 1.15, r_b * 1.15)
                         Omega_p = self.basis.evaluate(coords_eval)
                         s_turn = Omega_p @ w_p
-                        vE_turn = self.runtime_electric_field_coefficients(s_turn)
+                        vE_turn = self.runtime_electric_field_coefficients(
+                            s_turn, enforce_zero_self_force=False
+                        )
 
                         if mode == "moment_multipole_only":
                             vE_active = np.zeros_like(vE_turn)
@@ -719,16 +815,14 @@ class AcceleratorSpaceChargeEngine:
                         Ox_p_nc = Ox_p[nc, :]
                         Oy_p_nc = Oy_p[nc, :]
 
-                        # Polynomial electric field reconstructed SOLELY from v_E = K_E s + v_E0
                         Ex_model = -(Ox_p_nc.T @ vE_active) * kernel_scale_ratio * core_weight
                         Ey_model = -(Oy_p_nc.T @ vE_active) * kernel_scale_ratio * core_weight
 
-                        # Apply opposing Hamiltonian multipole kick from the moment operator
                         px -= dt_kick * kappa_sc * Ex_model
                         py -= dt_kick * kappa_sc * Ey_model
 
-                        # In Mode D, add quadrupole envelope damper driven purely by
-                        # the measured 2nd-moment derivatives ds_200/dt, ds_020/dt
+                        # In Mode D only: add quadrupole envelope damper driven by
+                        # turn-to-turn differences of measured 2nd moments
                         if mode == "moment_full34_plus_damper":
                             s200 = float(s_turn[self.basis.get_index((2, 0, 0))])
                             s020 = float(s_turn[self.basis.get_index((0, 2, 0))])
@@ -742,11 +836,8 @@ class AcceleratorSpaceChargeEngine:
                             py -= 0.35 * (ds020 / (sigma0 ** 2)) * yc
 
                     # 4. Symplectic Second Half-Drift
-                    x_f = cos_half_x * x + sin_half_x * px
-                    px_f = -sin_half_x * x + cos_half_x * px
-                    y_f = cos_half_y * y + sin_half_y * py
-                    py_f = -sin_half_y * y + cos_half_y * py
-                    x, px, y, py = x_f, px_f, y_f, py_f
+                    x, px = chx * x + shx * px, -shx * x + chx * px
+                    y, py = chy * y + shy * py, -shy * y + chy * py
 
                 eps_turn = 0.5 * (_calc_rms_emittance(x, px) + _calc_rms_emittance(y, py))
                 emittance_hist[turn] = eps_turn / eps_0
@@ -754,7 +845,6 @@ class AcceleratorSpaceChargeEngine:
                     0.5 * (abs(np.std(x) - sigma0) + abs(np.std(y) - sigma0)) / sigma0
                 )
 
-            # Phase-independent transverse betatron action J_p = ((x-x_c)^2 + px^2 + (y-y_c)^2 + py^2) / (2 sigma0^2)
             xc_f = x - np.mean(x)
             yc_f = y - np.mean(y)
             pxc_f = px - np.mean(px)
@@ -807,6 +897,31 @@ class AcceleratorSpaceChargeEngine:
             },
         }
 
+    def evaluate_multiseed_robustness(self) -> Dict[str, float]:
+        """Evaluates mean and standard deviation of emittance growth across multiple random seeds."""
+        seeds = self.config.multi_seeds
+        open_list = []
+        mult_list = []
+        full34_list = []
+        damper_list = []
+        for s in seeds:
+            res = self.simulate_multiturn_envelope_tracking(seed=s)
+            open_list.append(res["emittance_growth_uncomp_pct"])
+            mult_list.append(res["emittance_growth_multipole_pct"])
+            full34_list.append(res["emittance_growth_full34_pct"])
+            damper_list.append(res["emittance_growth_ctrl_pct"])
+        return {
+            "num_seeds": len(seeds),
+            "open_mean": float(np.mean(open_list)),
+            "open_std": float(np.std(open_list)),
+            "multipole_mean": float(np.mean(mult_list)),
+            "multipole_std": float(np.std(mult_list)),
+            "full34_mean": float(np.mean(full34_list)),
+            "full34_std": float(np.std(full34_list)),
+            "damper_mean": float(np.mean(damper_list)),
+            "damper_std": float(np.std(damper_list)),
+        }
+
     def benchmark_accelerator_loop(self, num_runs: Optional[int] = None) -> Dict[str, float]:
         """Benchmarks the microsecond turn-by-turn latency of potential and 3D field engines."""
         runs = num_runs if num_runs is not None else self.config.benchmark_iterations
@@ -815,7 +930,7 @@ class AcceleratorSpaceChargeEngine:
 
         for _ in range(warmup):
             _ = self.runtime_potential_coefficients(s_test)
-            _ = self.runtime_electric_field_coefficients(s_test)
+            _ = self.runtime_electric_field_coefficients(s_test, enforce_zero_self_force=False)
 
         t0 = time.perf_counter()
         for _ in range(runs):
@@ -824,7 +939,7 @@ class AcceleratorSpaceChargeEngine:
 
         t1 = time.perf_counter()
         for _ in range(runs):
-            _ = self.runtime_electric_field_coefficients(s_test)
+            _ = self.runtime_electric_field_coefficients(s_test, enforce_zero_self_force=False)
         t_field = time.perf_counter() - t1
 
         return {
