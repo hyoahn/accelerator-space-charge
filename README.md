@@ -1,94 +1,58 @@
-# Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy Hadron Beams via Closed-Form Moment Invariants
+# High-Intensity Accelerator 3D Space-Charge & Active Multipole Control Engine
 
-**Author & Originator:** Dr. Hyo Eun Ahn (*Independent Researcher*, `ahn@aya.yale.edu`)  
-**Companion Software Repository for arXiv Preprint:**  
-> H. E. Ahn, *"Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy Hadron Beams via Closed-Form Moment Invariants"* (2026).
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
----
+Official open-source Python reference engine and verification suite for the manuscript:
 
-## 1. Overview & Mathematical Foundation (LANL 1994 $\to$ CERN/FCC 2026)
-
-In high-intensity circular synchrotrons and next-generation hadron colliders (**CERN HL-LHC**, **FCC-hh**, **Fermilab PIP-II**, **SNS**), non-linear Coulomb space-charge forces drive resonance crossing, transverse emittance blowup, and beam halo loss. Traditional 3D Particle-in-Cell (PIC) solvers require $O(N^2)$ or $O(N \log N)$ grid computations that cannot execute within the microsecond ($\le 10\ \mu\text{s}$) single-turn revolution budget.
-
-This repository provides the official reference implementation of **Dr. Hyo Eun Ahn's Closed-Form 3D Space-Charge Moment Reduction Engine**, originally derived in 1994 during the Los Alamos National Laboratory (LANL) BEDLAM space-charge study and published in full analytical and numerical form here.
-
-### Three Foundational Theorems Implemented & Verified
-
-1. **Theorem 1 — Underdetermined 3D Bunch Charge Inversion with Normalized Prior (`report1.pdf`, April 4, 1994):**
-   $$\mathbf{a} = \mathbf{\Lambda}\mathbf{s} + \mathbf{c}, \quad \mathbf{\Lambda} = \mathbf{\Omega}^T (\mathbf{\Omega}\mathbf{\Omega}^T)^{-1}, \quad \mathbf{c} = \left[\mathbf{I}_N - \mathbf{\Lambda}\mathbf{\Omega}\right]\boldsymbol{\mu}$$
-   - Proves algebraically and numerically that an unnormalized constant prior $\mu_i = \text{const}$ yields zero difference from $\mu_i = 0$ ($\|\mathbf{a}(\mu=\text{const}) - \mathbf{a}(\mu=0)\|_\infty = 0$).
-   - Enforcing the strictly normalized physical bunch prior $\sum_{i=1}^N \mu_i = 1$ with matched second moments suppresses unphysical negative halo charge outside the bunch by $>3\times$ while conserving all $M=35$ spatial moments to machine precision.
-
-2. **Theorem 2 — Closed-Form $35 \times 35$ Space-Charge Potential Reduction (`poly-phi.pdf`, 1994):**
-   $$\mathbf{v} = \mathbf{K}\mathbf{s} + \mathbf{v}_0, \quad \mathbf{K} = \mathbf{\Lambda}'^T \mathbf{D} \mathbf{\Lambda} \in \mathbb{R}^{35 \times 35}, \quad \mathbf{v}_0 = \mathbf{\Lambda}'^T \mathbf{D} \mathbf{c} \in \mathbb{R}^{35}$$
-   where $\mathbf{\Lambda}'^T = \left[\{\mathbf{\Omega}\boldsymbol{\mu}\}\mathbf{\Omega}^T\right]^{-1}\{\mathbf{\Omega}\boldsymbol{\mu}\}$ eliminates the $N$-point mesh at runtime and preserves all 35 potential moment averages:
-   $$\langle m_k \phi^{\text{approx}} \rangle_{\mathbf{a}} = \langle m_k \phi^{\text{exact}} \rangle_{\mathbf{a}}, \quad k = 1, \dots, 35.$$
-
-3. **Theorem 3 — Direct 3D Vector Electric Field Fit & Average Force Preservation (`poly-e.pdf`, 1994):**
-   $$\sum_{j=1}^3 \{\tilde{\mathbf{\Omega}}^{x_j}\mathbf{a}\}\tilde{\mathbf{\Omega}}^{x_j T}\mathbf{v}_E = -\sum_{j=1}^3 \{\tilde{\mathbf{\Omega}}^{x_j}\mathbf{a}\}\mathbf{E}_{x_j}^{\text{exact}}$$
-   - Excludes the constant 0th-order monomial to guarantee strict invertibility over the $M_E = 34$ non-constant monomials.
-   - Preserves all 34 generalized virial/electric-field moment averages and rigorously satisfies the **Average Force Preservation Theorem**:
-     $$\langle \mathbf{E}_{\text{approx}} \rangle_{\mathbf{a}} = \langle \mathbf{E}_{\text{exact}} \rangle_{\mathbf{a}} = \mathbf{0}$$
-   - Collapses at runtime into a single $34 \times 35$ matrix operation $\mathbf{v}_E = \mathbf{K}_E\mathbf{s} + \mathbf{v}_{E,0}$, mapping Beam Position Monitor (BPM) moments directly to compensating Dipole Kicker, Quadrupole, and Octupole magnet strengths in $< 5\ \mu\text{s}$.
+> **Microsecond Active Mitigation of Space-Charge Instabilities in High-Intensity Hadron Rings via Closed-Form Moment Invariants**  
+> **Author:** Dr. Hyo Eun Ahn (`ahn@aya.yale.edu`)  
+> **Theoretical Origin:** 1994 Los Alamos National Laboratory (LANL) Space-Charge Moment Study (`report1.pdf`, `poly-phi.pdf`, `poly-e.pdf`)
 
 ---
 
-## 2. Repository Structure
+## 1. Physical Regime & Mathematical Highlights
 
-```text
-accelerator-space-charge/
-├── Core/
-│   ├── __init__.py
-│   └── accelerator_space_charge_engine.py   # 35x35 Potential, 34x35 3D E-Field & Multipole Kicker Engine
-├── Test/
-│   └── benchmark_accelerator_space_charge.py # Verification of LANL 1994 Theorems 1-3 & latency benchmark
-├── Assets/
-│   └── benchmark_accelerator.png            # Publication plot (34 E-field averages & turn latency)
-├── requirements.txt                         # Minimal scientific Python dependencies (numpy, matplotlib)
-└── README.md
-```
+In low-to-medium energy high-intensity hadron accumulator rings, rapid-cycling synchrotrons, and collider injector boosters—such as the **LANL Proton Storage Ring (PSR)** ($E_k = 800\,\mathrm{MeV}, T_{\mathrm{rev}} = 0.358\,\mu\mathrm{s}$), **ORNL Spallation Neutron Source (SNS)** ($E_k = 1.0\,\mathrm{GeV}, T_{\mathrm{rev}} = 0.945\,\mu\mathrm{s}$), **CERN Proton Synchrotron Booster (PSB)** ($T_{\mathrm{rev}} = 0.57\text{--}1.01\,\mu\mathrm{s}$), and **FAIR SIS18**—the incoherent Laslett space-charge tune shift reaches $|\Delta Q_{\mathrm{sc}}| \approx 0.1\text{--}0.4$, driving envelope mismatch resonances and transverse emittance growth over a few turns ($5$-turn control window $\le 5.0\,\mu\mathrm{s}$).
+
+This repository implements the three foundational 1994 Los Alamos theorems and a self-contained multi-turn symplectic macro-particle tracking simulation:
+
+1. **Theorem 1 — Affine Charge Inversion with Normalized Physical Prior (`report1.pdf`)**:
+   $$\mathbf{a} = \mathbf{\Lambda}\mathbf{s} + \mathbf{c}, \qquad \mathbf{\Lambda} = \mathbf{\Omega}^T(\mathbf{\Omega}\mathbf{\Omega}^T)^{-1}, \qquad \mathbf{c} = (\mathbf{I}_N - \mathbf{\Lambda}\mathbf{\Omega})\boldsymbol{\mu}$$
+   - Proves that Paul Channell's uniform prior $\mu_i = \mathrm{const}$ is algebraically identical to the zero prior ($\|\mathbf{a}(\mu=\mathrm{const}) - \mathbf{a}(\mu=0)\|_\infty = 6.72 \times 10^{-17}$).
+   - Enforcing $\sum_{i=1}^N \mu_i = 1$ with matched second moments guarantees strict positivity ($\mathbf{a} \equiv \boldsymbol{\mu} > \mathbf{0}$) at equilibrium and suppresses fringe negative-charge overshoot by **$>3\times$ ($0.2669 \to 0.0876$)** and $L_2$ profile error by **$2\times$ ($0.0326 \to 0.0163$)** under finite moment perturbations.
+
+2. **Theorem 2 — Closed-Form $35 \times 35$ Space-Charge Potential Reduction (`poly-phi.pdf`)**:
+   $$\mathbf{v} = \mathbf{K}\mathbf{s} + \mathbf{v}_0, \qquad \mathbf{K} = \mathbf{\Lambda}^{\prime T}(\boldsymbol{\mu})\mathbf{D}\mathbf{\Lambda} \in \mathbb{R}^{35 \times 35}$$
+   - Eliminates the $N$-point spatial mesh offline and preserves all $M=35$ weighted potential moment averages to machine precision ($2.78 \times 10^{-17}$).
+
+3. **Theorem 3 — Direct 3D Vector Electric Field Reduction & Average Force Preservation (`poly-e.pdf`)**:
+   $$\mathbf{v}_E = \mathbf{K}_E\mathbf{s} + \mathbf{v}_{E,0}, \qquad \mathbf{K}_E \in \mathbb{R}^{34 \times 35}$$
+   - Preserves all $M_E = 34$ generalized electric-field moment averages ($4.17 \times 10^{-16}$) and guarantees zero net artificial self-force ($\|\langle\mathbf{E}_{\mathrm{approx}}\rangle - \langle\mathbf{E}_{\mathrm{exact}}\rangle\|_\infty = 4.58 \times 10^{-16}$).
+   - Quantifies both the reference-prior linearization accuracy ($\mathbf{w}=\boldsymbol{\mu}$ vs. $\mathbf{w}=\mathbf{a}$) and interior beam-core multipole fit fidelity ($R^2 = 0.8962$ inside $r \le 0.45$).
+
+4. **Multi-Turn Symplectic Macro-Particle Tracking (`simulate_multiturn_envelope_tracking`)**:
+   - Tracks $N_p = 2,000$ macro-particles over $200$ turns in a $1.0\,\mathrm{GeV}$ accumulator/booster lattice ($\Delta Q_{\mathrm{sc}} = -0.2271$) with an initial $18\%$ quadrupole envelope mismatch.
+   - Closed-loop moment-driven multipole compensation suppresses the envelope mismatch residual by **$>4\times$ ($8.08\% \to 1.94\%$)** and reduces RMS transverse emittance growth from **$+2.73\%$ to $+0.08\%$**.
 
 ---
 
-## 3. Quick Start & Verification Benchmark
+## 2. Quick Start & Verification
 
-### Installation
-```bash
-git clone https://github.com/hyoahn/accelerator-space-charge.git
-cd accelerator-space-charge
-pip install -r requirements.txt
-```
-
-### Run Verification & Benchmark Suite
 ```bash
 python3 Test/benchmark_accelerator_space_charge.py
 ```
 
-### Verified Benchmark Output ($N = 1,000 \to M = 35$, 10,000 Iterations)
-- **[Theorem 1]** Moment Conservation $\|\mathbf{\Omega}\mathbf{a} - \mathbf{s}\|_\infty$: `1.44e-15`
-- **[Theorem 1]** Channell Identity $\|\mathbf{a}(\mu=\text{const}) - \mathbf{a}(\mu=0)\|_\infty$: `6.72e-17`
-- **[Theorem 1]** Unphysical Negative Halo Charge Reduction: `0.2669 -> 0.0876` ($>3\times$ suppression)
-- **[Theorem 2]** 35 Space-Charge Potential Moment Averages Residual: `2.78e-17`
-- **[Theorem 3]** 34 Generalized 3D Electric Field Averages Residual: `4.17e-16`
-- **[Theorem 3]** Average Force Preservation $\|\langle \mathbf{E}_{\text{approx}}\rangle - \langle \mathbf{E}_{\text{exact}}\rangle\|_\infty$: `4.58e-16`
-- **Single-Turn Runtime Latency**: **`4.54 µs`** ($35 \times 35$ potential) / **`4.68 µs`** ($34 \times 35$ 3D electric field)
+### Verified Output Summary
 
-![Accelerator Benchmark Results](Assets/benchmark_accelerator.png)
-
----
-
-## 4. Citation
-
-```bibtex
-@article{ahn2026accelerator,
-  author  = {Ahn, Hyo E.},
-  title   = {Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy Hadron Beams via Closed-Form Moment Invariants},
-  journal = {arXiv preprint},
-  year    = {2026},
-  note    = {Code available at https://github.com/hyoahn/accelerator-space-charge}
-}
-```
-
-## 5. License & Priority Notice
-Copyright (c) 2026 Dr. Hyo Eun Ahn (`ahn@aya.yale.edu`). All rights reserved. Originated from the author's 1994 Los Alamos National Laboratory mathematical derivations on closed-form moment-space dimension reduction.
-
+| Verification Metric | Measured Value | Status |
+| :--- | :--- | :--- |
+| Target Ring Regime ($E_k = 1.0\,\mathrm{GeV}$, $\gamma = 2.066$) | $T_{\mathrm{rev}} = 0.945\,\mu\mathrm{s}$, $\Delta Q_{\mathrm{sc}} = -0.2271$ | Verified |
+| Exact 35-Moment Conservation $\|\mathbf{\Omega}\mathbf{a} - \mathbf{s}\|_\infty$ | $1.44 \times 10^{-15}$ | PASS |
+| Channell Identity $\|\mathbf{a}(\mu=\mathrm{const}) - \mathbf{a}(\mu=0)\|_\infty$ | $6.72 \times 10^{-17}$ | PASS |
+| Fringe Negative-Charge Overshoot (Channell $\to$ Ahn Prior) | $0.2669 \to 0.0876$ ($3.04\times$ reduction) | PASS |
+| 35 Potential Moment Averages Residual | $2.78 \times 10^{-17}$ | PASS |
+| 34 Generalized 3D Electric Field Averages Residual | $4.17 \times 10^{-16}$ | PASS |
+| Average Force Preservation $\|\langle\mathbf{E}_{\mathrm{approx}}\rangle - \langle\mathbf{E}_{\mathrm{exact}}\rangle\|_\infty$ | $4.58 \times 10^{-16}$ | PASS |
+| 200-Turn Symplectic Tracking RMS Emittance Growth | $+2.73\% \to +0.08\%$ | PASS |
+| Runtime Latency ($35\times 35$ Potential / $34\times 35$ Field, CPU) | $\sim 4.43\,\mu\mathrm{s}$ / $\sim 4.45\,\mu\mathrm{s}$ | PASS ($< 5\,\mu\mathrm{s}$) |

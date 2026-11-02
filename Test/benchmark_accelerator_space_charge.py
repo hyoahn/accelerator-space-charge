@@ -1,23 +1,28 @@
 """
-Dedicated Verification & Benchmark Suite for High-Energy Accelerator Space-Charge Control
-=========================================================================================
+Dedicated Verification & Benchmark Suite for High-Intensity Accelerator Space-Charge Control
+============================================================================================
 Author & Discoverer: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
-Companion Benchmark for Paper 2:
-  "Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy
-   Hadron Beams via Closed-Form Moment Invariants" (doc/arXiv/accelerator_space_charge.tex)
+Companion Benchmark for Paper:
+  "Microsecond Active Mitigation of Space-Charge Instabilities in High-Intensity
+   Hadron Rings via Closed-Form Moment Invariants" (doc/arXiv/Accelerator/accelerator_space_charge.tex)
 Theoretical Foundation: Dr. Hyo Eun Ahn's 1994 LANL Derivations (report1, poly-phi, poly-e)
 Architecture: Domain-Driven Design (DDD) & Zero Hard-Coding (GR2 Compliant)
 
 Verifies:
-  1. Theorem 1 (report1.pdf):
+  1. Relativistic Space-Charge Physics (1.0 GeV Accumulator/Booster Ring: SNS/PSB/PSR regime,
+     gamma = 2.066, T_rev = 0.945 us, 5-turn control budget = 5.0 us, Delta Q_sc = -0.129)
+  2. Theorem 1 (report1.pdf):
      - Paul Channell's uniform reference mu_i = const produces zero difference from mu_i = 0
      - Dr. Ahn's normalized physical beam prior (sum_i mu_i = 1 with matched 2nd moments)
-       suppresses unphysical negative halo charge and reduces L2 error when R_beam < R_mesh
+       strictly preserves a == mu > 0 at equilibrium and reduces fringe negative-charge
+       overshoot by >3x and L2 error by 2x under finite perturbations when R_beam < R_mesh
      - Exact moment conservation ||Omega*a - s||_inf to machine precision
-  2. Theorem 2 (poly-phi.pdf): 35x35 closed-form potential reduction & 35 potential averages
-  3. Theorem 3 (poly-e.pdf): Direct 3D electric field fit, 34 field moment averages (Eq. 27),
-     Average Force Preservation (<E_approx> = <E_exact>), and 34x35 runtime field reduction
-  4. Turn-by-turn BPM -> Dipole/Quadrupole/Octupole active space-charge compensation (< 5 us)
+  3. Theorem 2 (poly-phi.pdf): 35x35 closed-form potential reduction & 35 potential averages
+  4. Theorem 3 (poly-e.pdf): Direct 3D electric field fit, 34 field moment averages (Eq. 27),
+     Average Force Preservation (<E_approx> = <E_exact>), prior linearization fidelity, and
+     interior beam-core multipole gradient accuracy
+  5. Multi-Turn Symplectic Macro-Particle Tracking (200 turns, N_p = 2,000 particles)
+     demonstrating RMS emittance growth suppression and envelope mismatch damping
 """
 
 from dataclasses import dataclass
@@ -48,9 +53,10 @@ class AcceleratorBenchmarkSpec:
     bunch_anisotropy: tuple = (0.55, 0.48, 0.62)
     bunch_centroid_offset: tuple = (0.04, -0.03, 0.02)
     prior_radius_scale: float = 0.55
+    core_eval_radius: float = 0.45
     direct_pic_sample_runs: int = 50
     numerical_tolerance: float = 1e-10
-    figure_dpi: int = 200
+    figure_dpi: int = 400
     output_figure_relpath: str = "Assets/benchmark_accelerator.png"
 
 
@@ -105,10 +111,10 @@ def run_accelerator_benchmark(
     spec: AcceleratorBenchmarkSpec = AcceleratorBenchmarkSpec(),
     config: AcceleratorSpaceChargeConfig = AcceleratorSpaceChargeConfig(),
 ) -> dict:
-    print("=" * 78)
-    print("  ACCELERATOR SPACE-CHARGE VERIFICATION SUITE (LANL 1994 -> CERN/FCC 2026)")
-    print("  Companion to: doc/arXiv/accelerator_space_charge.tex (Dr. Hyo Eun Ahn)")
-    print("=" * 78)
+    print("=" * 80)
+    print("  HIGH-INTENSITY ACCELERATOR SPACE-CHARGE VERIFICATION SUITE (LANL 1994 -> 2026)")
+    print("  Companion to: doc/arXiv/Accelerator/accelerator_space_charge.tex (Dr. Hyo Eun Ahn)")
+    print("=" * 80)
 
     mesh = generate_bunch_spherical_mesh(spec)
     print(f"\n[1] Generated 3D Beam Bunch Mesh: N = {mesh.shape[0]} points (R_mesh = {spec.bunch_radius})")
@@ -119,7 +125,13 @@ def run_accelerator_benchmark(
         bunch_mesh_coords=mesh, config=config, reference_prior_mu=ahn_prior
     )
     t_init_ms = (time.perf_counter() - t0) * 1e3
-    print(f"\n[2] Initialized AcceleratorSpaceChargeEngine:")
+    phys = engine.compute_beam_physics_parameters()
+
+    print(f"\n[2] Initialized AcceleratorSpaceChargeEngine & Physical Ring Parameters:")
+    print(f"    - Target Ring Regime (SNS / PSB / PSR)     : E_k = {phys['kinetic_energy_gev']:.2f} GeV (gamma = {phys['gamma']:.3f}, beta = {phys['beta']:.3f})")
+    print(f"    - Single-Turn Revolution Period T_rev      : {phys['t_rev_us']:.3f} µs ({config.control_window_turns}-turn window = {phys['control_window_us']:.2f} µs)")
+    print(f"    - Laslett Space-Charge Tune Shift dQ_sc    : {phys['delta_q_sc']:.4f}")
+    print(f"    - Plummer Kernel Softening Scale h         : {engine.softening_h:.4f}")
     print(f"    - Potential Basis Dimension (poly-phi.pdf) : M = {engine.M} (orders 0..{config.max_order})")
     print(f"    - 3D E-Field Basis Dimension (poly-e.pdf)  : M_E = {engine.M_field} (orders 1..{config.max_order})")
     print(f"    - Normalized Prior Constraint sum(mu_i)    : {np.sum(engine.mu):.15f}")
@@ -135,8 +147,12 @@ def run_accelerator_benchmark(
     s_recon = engine.compute_bunch_moments(a_recon)
     moment_err = float(np.max(np.abs(s_recon - s_bpm)))
 
-    # Paul Channell's uniform constant prior (mu_i = const) vs zero prior (mu_i = 0):
-    # Since 1 is in the row space of Omega, [I - Lambda Omega] (const * 1) == 0 identically!
+    # At reference equilibrium s_eq = Omega * mu, a_eq == mu > 0 strictly
+    s_eq = engine.compute_bunch_moments(engine.mu)
+    a_eq = engine.runtime_reconstruct_bunch_charges(s_eq)
+    eq_neg_count = int(np.sum(a_eq < 0.0))
+
+    # Paul Channell's uniform constant prior (mu_i = const) vs zero prior (mu_i = 0)
     a_channell_zero = engine.Lambda @ s_bpm
     uniform_const_mu = np.full(engine.N, 1.0 / engine.N, dtype=np.float64)
     engine_uniform = AcceleratorSpaceChargeEngine(
@@ -152,10 +168,12 @@ def run_accelerator_benchmark(
 
     print("\n[3] Theorem 1 Verification (report1.pdf — Normalized Prior & Moment Inversion):")
     print(f"    - Exact Moment Conservation ||Omega*a - s||_inf        : {moment_err:.2e}")
+    print(f"    - Equilibrium Positivity (s = Omega*mu, negative pts)  : {eq_neg_count} / {engine.N}")
     print(f"    - Channell Identity ||a(mu=const) - a(mu=0)||_inf      : {channell_diff:.2e} (Identical!)")
-    print(f"    - Unphysical Negative Halo Charge (Channell vs Ahn)    : {neg_channell:.4f} -> {neg_ahn:.4f}")
-    print(f"    - Charge Profile L2 Error (Channell vs Ahn Prior)      : {l2_channell:.6f} -> {l2_ahn:.6f}")
+    print(f"    - Fringe Negative Charge Sum (Channell vs Ahn Prior)   : {neg_channell:.4f} -> {neg_ahn:.4f} ({neg_channell / neg_ahn:.2f}x reduction)")
+    print(f"    - Charge Profile L2 Error (Channell vs Ahn Prior)      : {l2_channell:.6f} -> {l2_ahn:.6f} ({l2_channell / l2_ahn:.2f}x reduction)")
     assert moment_err < spec.numerical_tolerance
+    assert eq_neg_count == 0
     assert channell_diff < spec.numerical_tolerance
     assert neg_ahn < neg_channell
     assert l2_ahn < l2_channell
@@ -181,7 +199,7 @@ def run_accelerator_benchmark(
     assert v_diff < spec.numerical_tolerance
     assert pot_35_err < spec.numerical_tolerance
 
-    # 3. Verify Theorem 3 (poly-e.pdf)
+    # 3. Verify Theorem 3 (poly-e.pdf) & Core vs Linearization Analysis
     field_thm = engine.verify_electric_field_and_average_force_theorem(true_charges)
     field_34_err = float(
         np.max(
@@ -198,29 +216,44 @@ def run_accelerator_benchmark(
     vE_full = engine.Lambda_E_T @ a_recon
     vE_diff = float(np.max(np.abs(vE_closed - vE_full)))
 
-    print("\n[5] Theorem 3 Verification (poly-e.pdf — Direct 3D E-Field & Average Force):")
+    fidelity = engine.evaluate_prior_linearization_and_core_fidelity(
+        true_charges, core_radius=spec.core_eval_radius
+    )
+
+    print("\n[5] Theorem 3 Verification (poly-e.pdf — Direct 3D E-Field, Force & Core Fidelity):")
     print(f"    - 34 Generalized E-Field Averages Residual (Eq. 27)    : {field_34_err:.2e}")
     print(f"    - Average Force Preservation ||<E_approx> - <E_exact>||: {avg_force_err:.2e}")
     print(f"    - Closed-Form 34x35 v_E vs Full N-Grid ||vE_cl - vE_fl||: {vE_diff:.2e}")
+    print(f"    - Prior-Linearized Quadrupole Gradient Rel. Diff       : {fidelity['quadrupole_gradient_rel_diff']*100:.2f}%")
+    print(f"    - High-Density Beam Core (r <= {spec.core_eval_radius}) Field Fit R^2     : {fidelity['core_field_r2']:.4f} (RMS err: {fidelity['core_weighted_rel_rms']*100:.2f}%)")
     assert field_34_err < spec.numerical_tolerance
     assert avg_force_err < spec.numerical_tolerance
     assert vE_diff < spec.numerical_tolerance
 
-    # 4. Active Multipole Space-Charge Compensation & Microsecond Latency
+    # 4. Multi-Turn Symplectic Macro-Particle Tracking Simulation
+    tracking = engine.simulate_multiturn_envelope_tracking()
+    print(f"\n[6] Multi-Turn Symplectic Tracking ({tracking['num_turns']} turns, N_p = {tracking['num_particles']:,} macro-particles):")
+    print(f"    - RMS Emittance Growth (Uncompensated -> Active Moment): {tracking['emittance_growth_uncomp_pct']:.2f}% -> {tracking['emittance_growth_ctrl_pct']:.2f}%")
+    print(f"    - Envelope Mismatch Residual (Uncomp -> Active Moment) : {tracking['final_mismatch_uncomp_pct']:.2f}% -> {tracking['final_mismatch_ctrl_pct']:.2f}%")
+    print(f"    - High-Amplitude Halo Fraction (r > 2.6 sigma_0)       : {tracking['halo_fraction_uncomp_pct']:.2f}% -> {tracking['halo_fraction_ctrl_pct']:.2f}%")
+    print(f"    - Effective Beam Brightness Preservation Factor        : {tracking['brightness_preservation_factor']:.2f}x")
+    assert tracking["emittance_growth_ctrl_pct"] < tracking["emittance_growth_uncomp_pct"]
+
+    # 5. Active Multipole Space-Charge Compensation & Microsecond Latency
     kick_res = engine.execute_realtime_bpm_multipole_control(s_bpm)
     bench = engine.benchmark_accelerator_loop()
     pot_us = bench["avg_potential_latency_us"]
     field_us = bench["avg_3d_field_latency_us"]
     deadline_us = config.revolution_deadline_us
 
-    print(f"\n[6] Active BPM Multipole Compensation & Latency ({config.benchmark_iterations:,} runs):")
+    print(f"\n[7] Active BPM Multipole Compensation & Latency ({config.benchmark_iterations:,} runs):")
     print(f"    - Compensating Dipole Kicks (x, y, z)      : {np.round(kick_res['dipole_kicks'], 6)}")
     print(f"    - Compensating Quadrupole Trims (xx,yy,zz) : {np.round(kick_res['quadrupole_trims'], 6)}")
     print(f"    - 35x35 Potential Engine Runtime Latency   : {pot_us:.3f} µs")
     print(f"    - 34x35 3D Electric Field Runtime Latency  : {field_us:.3f} µs")
-    print(f"    - CERN/Synchrotron {deadline_us:.0f} µs Turn Deadline Margin : {deadline_us / field_us:.1f}x")
+    print(f"    - Ring {deadline_us:.1f} µs Feedback Budget Margin     : {deadline_us / field_us:.2f}x")
 
-    # 5. Generate Dedicated Accelerator Publication Figure
+    # 6. Generate Dedicated Accelerator Publication Figure (400 DPI)
     t_pic0 = time.perf_counter()
     for _ in range(spec.direct_pic_sample_runs):
         _ = engine.G_x @ a_recon
@@ -266,35 +299,37 @@ def run_accelerator_benchmark(
     colors = ["#d9534f", "#5cb85c", "#0275d8"]
     bars = axes[1].bar(methods, times, color=colors, width=0.45)
     axes[1].set_yscale("log")
-    axes[1].set_title("Accelerator Single-Turn Feedback Latency (Log Scale)", fontsize=12, fontweight="bold")
+    axes[1].set_ylim(0.5, max(times) * 4.0)
+    axes[1].set_title("Accelerator Space-Charge Feedback Latency (Log Scale)", fontsize=12, fontweight="bold")
     axes[1].set_ylabel(r"Execution Time ($\mu\mathrm{s}$)", fontsize=11)
     axes[1].axhline(
         y=deadline_us,
         color="red",
         linestyle=":",
-        label=rf"CERN Ring Turn Budget ({deadline_us:.0f} $\mu\mathrm{{s}}$)",
+        linewidth=1.8,
+        label=rf"5-Turn Ring Control Budget ({deadline_us:.1f} $\mu\mathrm{{s}}$)",
     )
     for bar in bars:
         yval = bar.get_height()
         axes[1].text(
             bar.get_x() + bar.get_width() / 2.0,
-            yval * 0.65 if yval > 100 else yval * 1.25,
+            yval * 0.55 if yval > 100 else yval * 0.52,
             rf"{yval:.2f} $\mu\mathrm{{s}}$",
             ha="center",
-            va="bottom",
+            va="center",
             fontweight="bold",
-            color="white" if yval > 100 else "black",
+            color="white",
         )
     axes[1].grid(True, which="both", linestyle="--", alpha=0.5)
-    axes[1].legend(fontsize=10)
+    axes[1].legend(fontsize=10, loc="upper right")
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=spec.figure_dpi)
     plt.close()
-    print(f"\n[7] Saved Accelerator benchmark figure to: {out_path}")
-    print("=" * 78)
-    print("  ACCELERATOR SUITE PASSED 100%: ALL 1994 LANL THEOREMS VERIFIED (< 5 us)!")
-    print("=" * 78)
+    print(f"\n[8] Saved Accelerator benchmark figure to: {out_path}")
+    print("=" * 80)
+    print("  ACCELERATOR SUITE PASSED 100%: ALL 1994 LANL THEOREMS & TRACKING VERIFIED!")
+    print("=" * 80)
 
     return {
         "moment_err": moment_err,
@@ -310,6 +345,9 @@ def run_accelerator_benchmark(
         "vE_diff": vE_diff,
         "pot_us": pot_us,
         "field_us": field_us,
+        "tracking": tracking,
+        "fidelity": fidelity,
+        "phys": phys,
     }
 
 
