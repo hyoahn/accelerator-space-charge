@@ -1,6 +1,6 @@
 # Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy Hadron Beams via Closed-Form Moment Invariants
 
-**Author & Originator:** Dr. Hyo E. Ahn (*Independent Researcher*, `ahn@aya.yale.edu`)  
+**Author & Originator:** Dr. Hyo Eun Ahn (*Independent Researcher*, `ahn@aya.yale.edu`)  
 **Companion Software Repository for arXiv Preprint:**  
 > H. E. Ahn, *"Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy Hadron Beams via Closed-Form Moment Invariants"* (2026).
 
@@ -10,7 +10,7 @@
 
 In high-intensity circular synchrotrons and next-generation hadron colliders (**CERN HL-LHC**, **FCC-hh**, **Fermilab PIP-II**, **SNS**), non-linear Coulomb space-charge forces drive resonance crossing, transverse emittance blowup, and beam halo loss. Traditional 3D Particle-in-Cell (PIC) solvers require $O(N^2)$ or $O(N \log N)$ grid computations that cannot execute within the microsecond ($\le 10\ \mu\text{s}$) single-turn revolution budget.
 
-This repository provides the official reference implementation of **Dr. Hyo E. Ahn's Closed-Form 3D Space-Charge Moment Reduction Engine**, originally derived in 1994 during the Los Alamos National Laboratory (LANL) BEDLAM space-charge study and published in full analytical and numerical form here.
+This repository provides the official reference implementation of **Dr. Hyo Eun Ahn's Closed-Form 3D Space-Charge Moment Reduction Engine**, originally derived in 1994 during the Los Alamos National Laboratory (LANL) BEDLAM space-charge study and published in full analytical and numerical form here.
 
 ### Three Foundational Theorems Implemented & Verified
 
@@ -90,5 +90,5 @@ python3 Test/benchmark_accelerator_space_charge.py
 ```
 
 ## 5. License & Priority Notice
-Copyright (c) 2026 Dr. Hyo E. Ahn (`ahn@aya.yale.edu`). All rights reserved. Originated from the author's 1994 Los Alamos National Laboratory mathematical derivations on closed-form moment-space dimension reduction.
+Copyright (c) 2026 Dr. Hyo Eun Ahn (`ahn@aya.yale.edu`). All rights reserved. Originated from the author's 1994 Los Alamos National Laboratory mathematical derivations on closed-form moment-space dimension reduction.
 

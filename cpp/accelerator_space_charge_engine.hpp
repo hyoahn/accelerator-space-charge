@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Dr. Hyo E. Ahn (ahn@aya.yale.edu)
+// Copyright (c) 2026 Dr. Hyo Eun Ahn (ahn@aya.yale.edu)
 // C++20 Deterministic 35x35 Potential & 34x35 3D Electric Field Space-Charge Engine
 #pragma once
 #include <array>

@@ -1,11 +1,11 @@
 """
 Dedicated Verification & Benchmark Suite for High-Energy Accelerator Space-Charge Control
 =========================================================================================
-Author & Discoverer: Dr. Hyo E. Ahn (Independent Researcher, ahn@aya.yale.edu)
+Author & Discoverer: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
 Companion Benchmark for Paper 2:
   "Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy
    Hadron Beams via Closed-Form Moment Invariants" (doc/arXiv/accelerator_space_charge.tex)
-Theoretical Foundation: Dr. Hyo E. Ahn's 1994 LANL Derivations (report1, poly-phi, poly-e)
+Theoretical Foundation: Dr. Hyo Eun Ahn's 1994 LANL Derivations (report1, poly-phi, poly-e)
 Architecture: Domain-Driven Design (DDD) & Zero Hard-Coding (GR2 Compliant)
 
 Verifies:
@@ -107,7 +107,7 @@ def run_accelerator_benchmark(
 ) -> dict:
     print("=" * 78)
     print("  ACCELERATOR SPACE-CHARGE VERIFICATION SUITE (LANL 1994 -> CERN/FCC 2026)")
-    print("  Companion to: doc/arXiv/accelerator_space_charge.tex (Dr. Hyo E. Ahn)")
+    print("  Companion to: doc/arXiv/accelerator_space_charge.tex (Dr. Hyo Eun Ahn)")
     print("=" * 78)
 
     mesh = generate_bunch_spherical_mesh(spec)

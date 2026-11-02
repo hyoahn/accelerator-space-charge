@@ -1,11 +1,11 @@
 """
 High-Energy Particle Accelerator 3D Space-Charge & Active Multipole Control Engine
 ==================================================================================
-Originator & Author: Dr. Hyo E. Ahn (Independent Researcher, ahn@aya.yale.edu)
+Originator & Author: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
 Companion Code for Paper 2:
   "Microsecond Active Mitigation of Space-Charge Instabilities in High-Energy
    Hadron Beams via Closed-Form Moment Invariants" (doc/arXiv/accelerator_space_charge.tex)
-Theoretical Foundation: Dr. Hyo E. Ahn's 1994 LANL Archival Derivations:
+Theoretical Foundation: Dr. Hyo Eun Ahn's 1994 LANL Archival Derivations:
   - report1.pdf  (April 4, 1994: BEDLAM 4th-Order Space-Charge Model Study)
   - poly-phi.pdf (1994: Polynomial Approximation to the Space-Charge Potential)
   - poly-e.pdf   (1994: Polynomial Approximation to the Space-Charge Field)
