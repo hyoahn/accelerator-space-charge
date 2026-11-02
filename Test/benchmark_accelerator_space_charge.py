@@ -237,14 +237,14 @@ def run_accelerator_benchmark(
         idx_34,
         field_thm["exact_field_averages_34"],
         "bo-",
-        label="Exact Coulomb Field Averages (Eq. 22)",
+        label="Exact Coulomb Field Averages (Eq. 20)",
         markersize=5,
     )
     axes[0].plot(
         idx_34,
         field_thm["approx_field_averages_34"],
         "rx--",
-        label="Ahn Polynomial E-Field Fit (Eq. 26)",
+        label="Ahn Polynomial E-Field Fit (Eq. 23)",
         markersize=4,
     )
     axes[0].set_title(
@@ -267,19 +267,19 @@ def run_accelerator_benchmark(
     bars = axes[1].bar(methods, times, color=colors, width=0.45)
     axes[1].set_yscale("log")
     axes[1].set_title("Accelerator Single-Turn Feedback Latency (Log Scale)", fontsize=12, fontweight="bold")
-    axes[1].set_ylabel("Execution Time (microseconds)", fontsize=11)
+    axes[1].set_ylabel(r"Execution Time ($\mu\mathrm{s}$)", fontsize=11)
     axes[1].axhline(
         y=deadline_us,
         color="red",
         linestyle=":",
-        label=f"CERN Ring Turn Budget ({deadline_us:.0f} µs)",
+        label=rf"CERN Ring Turn Budget ({deadline_us:.0f} $\mu\mathrm{{s}}$)",
     )
     for bar in bars:
         yval = bar.get_height()
         axes[1].text(
             bar.get_x() + bar.get_width() / 2.0,
             yval * 0.65 if yval > 100 else yval * 1.25,
-            f"{yval:.2f} µs",
+            rf"{yval:.2f} $\mu\mathrm{{s}}$",
             ha="center",
             va="bottom",
             fontweight="bold",

@@ -91,3 +91,4 @@ python3 Test/benchmark_accelerator_space_charge.py
 
 ## 5. License & Priority Notice
 Copyright (c) 2026 Dr. Hyo E. Ahn (`ahn@aya.yale.edu`). All rights reserved. Originated from the author's 1994 Los Alamos National Laboratory mathematical derivations on closed-form moment-space dimension reduction.
+
