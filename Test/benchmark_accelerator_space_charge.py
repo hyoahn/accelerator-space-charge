@@ -258,48 +258,55 @@ def run_accelerator_benchmark(
         true_charges, core_radius=spec.core_eval_radius
     )
 
-    print("\n[5] Theorem 3 Verification (poly-e.pdf — State Fit, Prior Operator & ZSF Gauge):")
+    print("\n[5] Theorem 3 Verification (poly-e.pdf — State Fit, Prior Operator & ZSF Dipolar Projection):")
     print(f"    - 34 Generalized E-Field Averages Residual (w = a)     : {field_34_err:.2e}")
     print(f"    - State-Weighted (w = a) Self-Force Residual           : {avg_force_err_state:.2e}")
     print(f"    - Prior-Weighted (w = mu) Moment Conservation Residual : {avg_force_err_mu:.2e}")
     print(f"    - Uncorrected Prior Operator Net Force ||<E_prior>_a|| : {avg_force_uncorr_prior:.4f} (mu^T G da != 0)")
-    print(f"    - ZSF Gauge-Projected Runtime Operator ||<E_ZSF>_a||   : {avg_force_err_zsf:.2e} (Exact Zero Self-Force!)")
+    print(f"    - ZSF Dipolar-Projected Runtime Operator ||<E_ZSF>_a|| : {avg_force_err_zsf:.2e} (Exact Zero Self-Force!)")
     print(f"    - Closed-Form 34x35 v_E vs Full N-Grid ||vE_cl - vE_fl||: {vE_diff:.2e}")
     print(f"    - Prior-Linearized Quadrupole Gradient Rel. Diff       : {fidelity['quadrupole_gradient_rel_diff']*100:.2f}%")
-    print(f"    - High-Density Beam Core (r <= {spec.core_eval_radius}) Field Fit R^2     : {fidelity['core_field_r2']:.4f} (RMS rel. err: {fidelity['core_weighted_rel_rms']*100:.2f}%)")
+    print(f"    - Core (r <= {spec.core_eval_radius}) Field R^2 (State w = a)            : {fidelity['core_field_r2']:.4f} (RMS rel. err: {fidelity['core_weighted_rel_rms']*100:.2f}%)")
+    print(f"    - Core (r <= {spec.core_eval_radius}) Field R^2 (Prior w = mu, uncorr.)  : {fidelity['core_field_r2_prior']:.4f} (RMS rel. err: {fidelity['core_weighted_rel_rms_prior']*100:.2f}%)")
+    print(f"    - Core (r <= {spec.core_eval_radius}) Field R^2 (ZSF Runtime w=mu+ZSF)   : {fidelity['core_field_r2_zsf']:.4f} (RMS rel. err: {fidelity['core_weighted_rel_rms_zsf']*100:.2f}%)")
     assert field_34_err < spec.numerical_tolerance
     assert avg_force_err_state < spec.numerical_tolerance
     assert avg_force_err_mu < spec.numerical_tolerance
     assert avg_force_err_zsf < spec.numerical_tolerance
     assert vE_diff < spec.numerical_tolerance
 
-    # 4. Non-Circular 2D Transverse Leapfrog Tracking in 3D Pairwise-Coulomb Geometry & Ablation
+    # 4. Non-Circular 2D Transverse Leapfrog Tracking in 3D Pairwise-Coulomb Geometry & De-Confounded Ablation
     t_track0 = time.perf_counter()
     tracking = engine.simulate_multiturn_envelope_tracking()
     t_track_sec = time.perf_counter() - t_track0
     print(
-        f"\n[6] 2D-in-3D Pairwise-Coulomb Leapfrog Tracking & Ablation "
+        f"\n[6] De-Confounded 10-Mode 2D-in-3D Pairwise-Coulomb Leapfrog Tracking "
         f"({tracking['num_turns']} turns, N_p = {tracking['num_particles']} particles, "
         f"dQ_sc,eff = {tracking['effective_dq_sc']:.4f}, {t_track_sec:.2f}s):"
     )
-    print("    - Initial Condition Identity Across All 4 Modes        : 100% Identical (Zero Rescaling)")
+    print("    - Initial Condition Identity Across All 10 Modes       : 100% Identical (Zero Rescaling)")
     print("    - Disturbance Model (Co-Moving 3D Pairwise Coulomb)    : Exact O(N_p^2) 3D Plummer-Coulomb")
-    print("    - Controller Feedback Law (Zero True-Field Access)     : Aperture-Regularized Moment Operator")
+    print("    - Windowed Moment ZSF Enforcement                      : Pure 35-Moment Corollary 4 (Zero np.mean Subtraction)")
     print(f"    - Mode A (Open-Loop Uncompensated)                     : dEps = +{tracking['emittance_growth_uncomp_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_uncomp_pct']:.2f}%, Halo = {tracking['halo_fraction_uncomp_pct']:.2f}%")
-    print(f"    - Mode B (Pure Moment Dipole+Quad+Oct Correctors Only) : dEps = +{tracking['emittance_growth_multipole_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_pct']:.2f}%")
-    print(f"    - Mode C (Pure Moment Full 34-Basis Field Only)        : dEps = +{tracking['emittance_growth_full34_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_pct']:.2f}%")
-    print(f"    - Mode D (Full 34-Basis Moment + ds_200/dt Damper)     : dEps = +{tracking['emittance_growth_ctrl_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_pct']:.2f}%")
-    print(f"    - Mode B-ZSF (Multipole Correctors + ZSF Gauge)        : dEps = +{tracking['emittance_growth_multipole_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_zsf_pct']:.2f}%")
-    print(f"    - Mode C-ZSF (Full 34-Basis Field + ZSF Gauge)         : dEps = +{tracking['emittance_growth_full34_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_zsf_pct']:.2f}%")
-    print(f"    - Mode D-ZSF (Full 34-Basis + Damper + ZSF Gauge)      : dEps = +{tracking['emittance_growth_ctrl_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_zsf_pct']:.2f}%")
-    print(f"    - Max Polynomial Self-Force (Uncorrected vs ZSF)       : {tracking['max_poly_selfforce_uncorr']:.4f} -> {tracking['max_poly_selfforce_zsf']:.2e}")
-    print(f"    - Max Applied Particle Net Kick (Uncorrected vs ZSF)   : {tracking['max_applied_selfforce_uncorr']:.4f} -> {tracking['max_applied_selfforce_zsf']:.2e}")
+    print(f"    - Mode B-Lab (Multipole Subset, Lab Frame, No ZSF)     : dEps = +{tracking['emittance_growth_multipole_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_pct']:.2f}%")
+    print(f"    - Mode B-CF  (Multipole Subset, Centroid Frame, No ZSF): dEps = +{tracking['emittance_growth_multipole_cf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_cf_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_cf_pct']:.2f}%")
+    print(f"    - Mode B-CF-ZSF (Multipole Subset, Centroid + ZSF)     : dEps = +{tracking['emittance_growth_multipole_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_multipole_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_multipole_zsf_pct']:.2f}%")
+    print(f"    - Mode C-Lab (Full 34-Basis, Lab Frame, No ZSF)        : dEps = +{tracking['emittance_growth_full34_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_pct']:.2f}%")
+    print(f"    - Mode C-CF  (Full 34-Basis, Centroid Frame, No ZSF)   : dEps = +{tracking['emittance_growth_full34_cf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_cf_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_cf_pct']:.2f}%")
+    print(f"    - Mode C-CF-ZSF (Full 34-Basis, Centroid + ZSF)        : dEps = +{tracking['emittance_growth_full34_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_full34_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_full34_zsf_pct']:.2f}%")
+    print(f"    - Mode D-Lab (Full 34 + Damper, Lab Frame, No ZSF)     : dEps = +{tracking['emittance_growth_ctrl_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_pct']:.2f}%")
+    print(f"    - Mode D-CF  (Full 34 + Damper, Centroid Frame, No ZSF): dEps = +{tracking['emittance_growth_ctrl_cf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_cf_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_cf_pct']:.2f}%")
+    print(f"    - Mode D-CF-ZSF (Full 34 + Damper, Centroid + ZSF)     : dEps = +{tracking['emittance_growth_ctrl_zsf_pct']:.2f}%, RMS Mismatch = {tracking['rms_mismatch_ctrl_zsf_pct']:.2f}%, Halo = {tracking['halo_fraction_ctrl_zsf_pct']:.2f}%")
+    print(f"    - Max Polynomial Self-Force (Centroid No-ZSF vs ZSF)   : {tracking['max_poly_selfforce_uncorr']:.4f} -> {tracking['max_poly_selfforce_zsf']:.2e}")
+    print(f"    - Max Applied Particle Net Kick (Centroid No-ZSF vs ZSF): {tracking['max_applied_selfforce_uncorr']:.4f} -> {tracking['max_applied_selfforce_zsf']:.2e}")
+    print(f"    - Spurious RMS Centroid Orbit Error (No-ZSF vs ZSF)    : {tracking['rms_cm_err_uncorr']:.4f} -> {tracking['rms_cm_err_zsf']:.2e}")
     assert tracking["emittance_growth_multipole_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["emittance_growth_full34_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["emittance_growth_ctrl_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["emittance_growth_ctrl_zsf_pct"] < tracking["emittance_growth_uncomp_pct"]
     assert tracking["max_poly_selfforce_zsf"] < spec.numerical_tolerance
     assert tracking["max_applied_selfforce_zsf"] < spec.numerical_tolerance
+    assert tracking["rms_cm_err_zsf"] < spec.numerical_tolerance
 
     # 5. Active Multipole Space-Charge Compensation & Compute Kernel Latency
     kick_res = engine.execute_realtime_bpm_multipole_control(s_bpm)
@@ -314,7 +321,7 @@ def run_accelerator_benchmark(
     print(f"    - Compensating Quadrupole Trims (xx,yy,zz) : {np.round(kick_res['quadrupole_trims'], 6)}")
     print(f"    - 35x35 Potential Kernel Compute Latency   : {pot_us:.3f} µs")
     print(f"    - 34x35 3D E-Field Kernel Compute Latency  : {field_us:.3f} µs")
-    print(f"    - 34x35 E-Field + ZSF Gauge Compute Latency: {field_zsf_us:.3f} µs")
+    print(f"    - 34x35 E-Field + ZSF Dipolar Projection   : {field_zsf_us:.3f} µs")
     print(f"    - 5-Turn Ring Control Window ({deadline_us:.1f} µs) Ratio : {deadline_us / field_us:.2f}x")
 
     # 6. Generate Dedicated Accelerator Publication Figure (400 DPI)
@@ -392,7 +399,7 @@ def run_accelerator_benchmark(
     plt.close()
     print(f"\n[8] Saved Accelerator benchmark figure to: {out_path}")
     print("=" * 80)
-    print("  ACCELERATOR SUITE PASSED 100%: ALL THEOREMS, ZSF GAUGE & 6D TRACKING VERIFIED!")
+    print("  ACCELERATOR SUITE PASSED 100%: ALL THEOREMS, ZSF PROJECTION & 2D-IN-3D TRACKING VERIFIED!")
     print("=" * 80)
 
     return {

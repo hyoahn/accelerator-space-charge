@@ -566,12 +566,11 @@ class AcceleratorSpaceChargeEngine:
         """
         field_thm = self.verify_electric_field_and_average_force_theorem(bunch_charges)
         v_E_state = field_thm["v_E"]
-
-        s_true = self.compute_bunch_moments(bunch_charges)
-        v_E_prior = self.runtime_electric_field_coefficients(s_true, enforce_zero_self_force=True)
+        v_E_prior_uncorr = field_thm["v_E_prior"]
+        v_E_zsf = field_thm["v_E_zsf"]
 
         quad_state = v_E_state[self.quadrupole_indices]
-        quad_prior = v_E_prior[self.quadrupole_indices]
+        quad_prior = v_E_zsf[self.quadrupole_indices]
         quad_rel_diff = float(
             np.linalg.norm(quad_prior - quad_state) / np.linalg.norm(quad_state)
         )
@@ -580,33 +579,40 @@ class AcceleratorSpaceChargeEngine:
         Ey_exact = self.G_y @ bunch_charges
         Ez_exact = self.G_z @ bunch_charges
 
-        Ex_state = -(self.Omega_x_nc.T @ v_E_state)
-        Ey_state = -(self.Omega_y_nc.T @ v_E_state)
-        Ez_state = -(self.Omega_z_nc.T @ v_E_state)
-
         radii = np.linalg.norm(self.r, axis=1)
         core_mask = (radii <= core_radius) & (bunch_charges > 0.0)
         w_core = bunch_charges[core_mask] / np.sum(bunch_charges[core_mask])
-
-        err_sq_core = (
-            (Ex_exact[core_mask] - Ex_state[core_mask]) ** 2
-            + (Ey_exact[core_mask] - Ey_state[core_mask]) ** 2
-            + (Ez_exact[core_mask] - Ez_state[core_mask]) ** 2
-        )
         mag_sq_core = (
             Ex_exact[core_mask] ** 2
             + Ey_exact[core_mask] ** 2
             + Ez_exact[core_mask] ** 2
         )
-        core_weighted_rel_rms = float(
-            np.sqrt(np.sum(w_core * err_sq_core) / np.sum(w_core * mag_sq_core))
-        )
-        core_r2 = float(1.0 - np.sum(w_core * err_sq_core) / np.sum(w_core * mag_sq_core))
+
+        def _eval_core_metrics(v_coeff: np.ndarray) -> Tuple[float, float]:
+            Ex_m = -(self.Omega_x_nc.T @ v_coeff)
+            Ey_m = -(self.Omega_y_nc.T @ v_coeff)
+            Ez_m = -(self.Omega_z_nc.T @ v_coeff)
+            err_sq = (
+                (Ex_exact[core_mask] - Ex_m[core_mask]) ** 2
+                + (Ey_exact[core_mask] - Ey_m[core_mask]) ** 2
+                + (Ez_exact[core_mask] - Ez_m[core_mask]) ** 2
+            )
+            rel_rms = float(np.sqrt(np.sum(w_core * err_sq) / np.sum(w_core * mag_sq_core)))
+            r2 = float(1.0 - np.sum(w_core * err_sq) / np.sum(w_core * mag_sq_core))
+            return r2, rel_rms
+
+        core_r2_state, core_rms_state = _eval_core_metrics(v_E_state)
+        core_r2_prior, core_rms_prior = _eval_core_metrics(v_E_prior_uncorr)
+        core_r2_zsf, core_rms_zsf = _eval_core_metrics(v_E_zsf)
 
         return {
             "quadrupole_gradient_rel_diff": quad_rel_diff,
-            "core_weighted_rel_rms": core_weighted_rel_rms,
-            "core_field_r2": core_r2,
+            "core_weighted_rel_rms": core_rms_state,
+            "core_field_r2": core_r2_state,
+            "core_weighted_rel_rms_prior": core_rms_prior,
+            "core_field_r2_prior": core_r2_prior,
+            "core_weighted_rel_rms_zsf": core_rms_zsf,
+            "core_field_r2_zsf": core_r2_zsf,
             "core_fraction_of_charge": float(np.sum(bunch_charges[core_mask])),
         }
 
@@ -668,18 +674,19 @@ class AcceleratorSpaceChargeEngine:
     ) -> Dict[str, float | np.ndarray | Dict[str, Dict[str, float]]]:
         """
         Executes a non-circular 2D transverse (x, px, y, py) Leapfrog macro-particle
-        tracking and 4-mode ablation study in a 3D bunch Coulomb geometry (with quasi-static
-        longitudinal coordinate z over 80 betatron turns, since T_synch >> 80 turns):
-          1. Identical Initial Conditions: All 4 modes start from the exact same initial
-             macro-particle coordinates (x_0, px_0, y_0, py_0, z_0) with zero rescaling.
-          2. Independent Self-Consistent O(N_p^2) 3D Pairwise Plummer-Coulomb Disturbance:
-             At every Leapfrog substep, the physical space-charge kick is computed from
-             direct 3D pairwise Plummer-Coulomb summation over all N_p macro-particles.
-          3. Pure Moment-Operator Feedback Controller (Zero Direct Disturbance Access):
-             The controller NEVER observes Ex_true or Ey_true. It measures only the 35
-             spatial moments s = (1/N_p) sum_p m(r_p), computes v_E = K_E s + v_E0 via the
-             precomputed 34x35 operator, and applies the resulting aperture-regularized
-             polynomial field kick.
+        tracking and de-confounded 10-mode ablation study in a 3D bunch Coulomb geometry
+        (with quasi-static longitudinal coordinate z over 80 betatron turns):
+          1. Identical Initial Conditions across all modes with zero rescaling.
+          2. Independent Self-Consistent O(N_p^2) 3D Pairwise Plummer-Coulomb Disturbance.
+          3. De-confounded Single-Variable Ablation separating:
+             - Laboratory-Frame evaluation (use_centroid_frame=False, use_zsf=False)
+             - Centroid-Frame evaluation without ZSF (use_centroid_frame=True, use_zsf=False)
+             - Centroid-Frame evaluation with ZSF dipolar offset projection (use_centroid_frame=True, use_zsf=True)
+          4. Pure 35-Moment Windowed ZSF Identity (Zero Particle-Level Mean Subtraction):
+             Using the aperture-windowed moment vector s_win = (1/N_p) sum_p w_core(r_p) m(r_p)
+             with s_{win,000} = 1 for the spatially uniform dipole kicker, Corollary 4 enforces
+             exact zero net particle kick (~10^-16) purely from the 35 moments without ever
+             subtracting np.mean(Ex_model) across particles.
         """
         cfg = self.config
         n_turns = num_turns if num_turns is not None else cfg.tracking_num_turns
@@ -763,7 +770,9 @@ class AcceleratorSpaceChargeEngine:
             upu = float(np.mean(u_c * pu_c))
             return float(np.sqrt(max(1e-16, u2 * pu2 - upu ** 2)))
 
-        def _run_mode(mode: str, use_zsf: bool = False) -> Dict[str, float | np.ndarray]:
+        def _run_mode(
+            mode: str, use_centroid_frame: bool = False, use_zsf: bool = False
+        ) -> Dict[str, float | np.ndarray]:
             x = raw_x.copy()
             px = raw_px.copy()
             y = raw_y.copy()
@@ -778,15 +787,17 @@ class AcceleratorSpaceChargeEngine:
 
             emittance_hist = np.zeros(n_turns + 1, dtype=np.float64)
             env_mismatch_hist = np.zeros(n_turns + 1, dtype=np.float64)
+            cm_hist = np.zeros((n_turns + 1, 2), dtype=np.float64)
 
             eps_0 = 0.5 * (_calc_rms_emittance(x, px) + _calc_rms_emittance(y, py))
             emittance_hist[0] = 1.0
             env_mismatch_hist[0] = float(
                 0.5 * (abs(np.std(x) - sigma0) + abs(np.std(y) - sigma0)) / sigma0
             )
+            cm_hist[0] = [float(np.mean(x)), float(np.mean(y))]
 
-            prev_s200 = float(np.mean(x ** 2))
-            prev_s020 = float(np.mean(y ** 2))
+            prev_s200 = float(np.mean((x - np.mean(x)) ** 2 if use_centroid_frame else x ** 2))
+            prev_s020 = float(np.mean((y - np.mean(y)) ** 2 if use_centroid_frame else y ** 2))
             max_poly_selfforce = 0.0
             max_applied_selfforce = 0.0
 
@@ -804,13 +815,8 @@ class AcceleratorSpaceChargeEngine:
 
                     # 3. Pure Moment-Operator Feedback Controller (NEVER sees Ex_true, Ey_true)
                     if mode != "open_loop":
-                        if use_zsf:
-                            # Align evaluation frame with instantaneous bunch centroid (s_100, s_010, s_001)
-                            # where the reference prior mu is centered, and enforce exact ZSF gauge (Corollary 4)
-                            cm_vec = np.mean(coords, axis=0, keepdims=True)
-                            coords_frame = coords - cm_vec
-                        else:
-                            coords_frame = coords
+                        cm_vec = np.mean(coords, axis=0, keepdims=True)
+                        coords_frame = (coords - cm_vec) if use_centroid_frame else coords
 
                         r_p = np.linalg.norm(coords_frame, axis=1)
                         core_weight = np.exp(
@@ -819,36 +825,50 @@ class AcceleratorSpaceChargeEngine:
                         coords_eval = np.clip(coords_frame, -r_b * 1.15, r_b * 1.15)
                         Omega_p = self.basis.evaluate(coords_eval)
                         s_turn = Omega_p @ w_p
-                        vE_turn = self.runtime_electric_field_coefficients(
-                            s_turn, enforce_zero_self_force=use_zsf
-                        )
+                        s_win = Omega_p @ (core_weight * w_p)
+                        s_win_zsf = s_win.copy()
+                        s_win_zsf[0] = 1.0
 
+                        vE_raw = self.runtime_electric_field_coefficients(
+                            s_turn, enforce_zero_self_force=False
+                        )
                         if mode == "moment_multipole_only":
-                            vE_active = np.zeros_like(vE_turn)
-                            vE_active[self.multipole_subset_indices] = vE_turn[
+                            vE_base = np.zeros_like(vE_raw)
+                            vE_base[self.multipole_subset_indices] = vE_raw[
                                 self.multipole_subset_indices
                             ]
-                            if use_zsf:
-                                vE_active = self.apply_zero_self_force_gauge(vE_active, s_turn)
                         else:
-                            vE_active = vE_turn
+                            vE_base = vE_raw
+
+                        if use_zsf:
+                            vE_poly = self.apply_zero_self_force_gauge(vE_base, s_turn)
+                            vE_act = self.apply_zero_self_force_gauge(vE_base, s_win_zsf)
+                        else:
+                            vE_poly = vE_base
+                            vE_act = vE_base
 
                         Ox_p, Oy_p, _ = self.basis.evaluate_derivatives(coords_eval)
                         Ox_p_nc = Ox_p[nc, :]
                         Oy_p_nc = Oy_p[nc, :]
 
-                        Ex_poly = -(Ox_p_nc.T @ vE_active) * kernel_scale_ratio
-                        Ey_poly = -(Oy_p_nc.T @ vE_active) * kernel_scale_ratio
+                        Ex_poly = -(Ox_p_nc.T @ vE_poly) * kernel_scale_ratio
+                        Ey_poly = -(Oy_p_nc.T @ vE_poly) * kernel_scale_ratio
                         poly_sf = max(abs(float(np.mean(Ex_poly))), abs(float(np.mean(Ey_poly))))
                         if poly_sf > max_poly_selfforce:
                             max_poly_selfforce = poly_sf
 
-                        Ex_model = Ex_poly * core_weight
-                        Ey_model = Ey_poly * core_weight
-                        if use_zsf:
-                            # Remove small residual dipolar offset induced by radial aperture taper w_core(r_p)
-                            Ex_model = Ex_model - float(np.mean(Ex_model))
-                            Ey_model = Ey_model - float(np.mean(Ey_model))
+                        if use_centroid_frame or use_zsf:
+                            # Spatially uniform dipole kicker (indices 0,1,2) + aperture-windowed
+                            # higher-order multipoles (indices 3:, p+q+l >= 2); zero np.mean subtraction
+                            Ex_model = (
+                                -vE_act[0] - core_weight * (Ox_p_nc[3:, :].T @ vE_act[3:])
+                            ) * kernel_scale_ratio
+                            Ey_model = (
+                                -vE_act[1] - core_weight * (Oy_p_nc[3:, :].T @ vE_act[3:])
+                            ) * kernel_scale_ratio
+                        else:
+                            Ex_model = Ex_poly * core_weight
+                            Ey_model = Ey_poly * core_weight
 
                         app_sf = max(abs(float(np.mean(Ex_model))), abs(float(np.mean(Ey_model))))
                         if app_sf > max_applied_selfforce:
@@ -866,13 +886,18 @@ class AcceleratorSpaceChargeEngine:
                             ds020 = s020 - prev_s020
                             prev_s200 = s200
                             prev_s020 = s020
-                            xc = x - float(s_turn[self.basis.get_index((1, 0, 0))])
-                            yc = y - float(s_turn[self.basis.get_index((0, 1, 0))])
+                            xc = (
+                                coords_frame[:, 0]
+                                if use_centroid_frame
+                                else (x - float(s_turn[self.basis.get_index((1, 0, 0))]))
+                            )
+                            yc = (
+                                coords_frame[:, 1]
+                                if use_centroid_frame
+                                else (y - float(s_turn[self.basis.get_index((0, 1, 0))]))
+                            )
                             dkx = 0.35 * (ds200 / (sigma0 ** 2)) * xc
                             dky = 0.35 * (ds020 / (sigma0 ** 2)) * yc
-                            if use_zsf:
-                                dkx = dkx - float(np.mean(dkx))
-                                dky = dky - float(np.mean(dky))
                             px -= dkx
                             py -= dky
 
@@ -885,6 +910,7 @@ class AcceleratorSpaceChargeEngine:
                 env_mismatch_hist[turn] = float(
                     0.5 * (abs(np.std(x) - sigma0) + abs(np.std(y) - sigma0)) / sigma0
                 )
+                cm_hist[turn] = [float(np.mean(x)), float(np.mean(y))]
 
             xc_f = x - np.mean(x)
             yc_f = y - np.mean(y)
@@ -901,21 +927,35 @@ class AcceleratorSpaceChargeEngine:
                 "max_poly_selfforce": float(max_poly_selfforce),
                 "max_applied_selfforce": float(max_applied_selfforce),
                 "centroid_drift": float(centroid_drift),
+                "cm_history": cm_hist,
                 "emittance_history": emittance_hist,
                 "mismatch_history": env_mismatch_hist,
             }
 
-        res_open = _run_mode("open_loop", use_zsf=False)
-        res_mult = _run_mode("moment_multipole_only", use_zsf=False)
-        res_full34 = _run_mode("moment_full34_only", use_zsf=False)
-        res_damper = _run_mode("moment_full34_plus_damper", use_zsf=False)
+        res_open = _run_mode("open_loop", use_centroid_frame=False, use_zsf=False)
+        cm_ref = res_open["cm_history"]
 
-        res_mult_zsf = _run_mode("moment_multipole_only", use_zsf=True)
-        res_full34_zsf = _run_mode("moment_full34_only", use_zsf=True)
-        res_damper_zsf = _run_mode("moment_full34_plus_damper", use_zsf=True)
+        def _attach_cm_err(res_dict: Dict) -> Dict:
+            res_dict["rms_cm_trajectory_err"] = float(
+                np.sqrt(np.mean(np.sum((res_dict["cm_history"] - cm_ref) ** 2, axis=1)))
+            )
+            return res_dict
+
+        _attach_cm_err(res_open)
+        res_mult_lab = _attach_cm_err(_run_mode("moment_multipole_only", use_centroid_frame=False, use_zsf=False))
+        res_mult_cf = _attach_cm_err(_run_mode("moment_multipole_only", use_centroid_frame=True, use_zsf=False))
+        res_mult_zsf = _attach_cm_err(_run_mode("moment_multipole_only", use_centroid_frame=True, use_zsf=True))
+
+        res_full34_lab = _attach_cm_err(_run_mode("moment_full34_only", use_centroid_frame=False, use_zsf=False))
+        res_full34_cf = _attach_cm_err(_run_mode("moment_full34_only", use_centroid_frame=True, use_zsf=False))
+        res_full34_zsf = _attach_cm_err(_run_mode("moment_full34_only", use_centroid_frame=True, use_zsf=True))
+
+        res_damper_lab = _attach_cm_err(_run_mode("moment_full34_plus_damper", use_centroid_frame=False, use_zsf=False))
+        res_damper_cf = _attach_cm_err(_run_mode("moment_full34_plus_damper", use_centroid_frame=True, use_zsf=False))
+        res_damper_zsf = _attach_cm_err(_run_mode("moment_full34_plus_damper", use_centroid_frame=True, use_zsf=True))
 
         eps_uncomp_end = 1.0 + res_open["emittance_growth_pct"] / 100.0
-        eps_ctrl_end = 1.0 + res_damper["emittance_growth_pct"] / 100.0
+        eps_ctrl_end = 1.0 + res_damper_zsf["emittance_growth_pct"] / 100.0
 
         return {
             "num_turns": n_turns,
@@ -924,86 +964,124 @@ class AcceleratorSpaceChargeEngine:
             "calibrated_kappa_sc": float(kappa_sc),
             "effective_dq_sc": float(-dq_sc),
             "emittance_growth_uncomp_pct": float(res_open["emittance_growth_pct"]),
-            "emittance_growth_multipole_pct": float(res_mult["emittance_growth_pct"]),
-            "emittance_growth_full34_pct": float(res_full34["emittance_growth_pct"]),
-            "emittance_growth_ctrl_pct": float(res_damper["emittance_growth_pct"]),
+            "emittance_growth_multipole_pct": float(res_mult_lab["emittance_growth_pct"]),
+            "emittance_growth_multipole_cf_pct": float(res_mult_cf["emittance_growth_pct"]),
             "emittance_growth_multipole_zsf_pct": float(res_mult_zsf["emittance_growth_pct"]),
+            "emittance_growth_full34_pct": float(res_full34_lab["emittance_growth_pct"]),
+            "emittance_growth_full34_cf_pct": float(res_full34_cf["emittance_growth_pct"]),
             "emittance_growth_full34_zsf_pct": float(res_full34_zsf["emittance_growth_pct"]),
+            "emittance_growth_ctrl_pct": float(res_damper_lab["emittance_growth_pct"]),
+            "emittance_growth_ctrl_cf_pct": float(res_damper_cf["emittance_growth_pct"]),
             "emittance_growth_ctrl_zsf_pct": float(res_damper_zsf["emittance_growth_pct"]),
             "rms_mismatch_uncomp_pct": float(res_open["rms_envelope_excursion_pct"]),
-            "rms_mismatch_multipole_pct": float(res_mult["rms_envelope_excursion_pct"]),
-            "rms_mismatch_full34_pct": float(res_full34["rms_envelope_excursion_pct"]),
-            "rms_mismatch_ctrl_pct": float(res_damper["rms_envelope_excursion_pct"]),
+            "rms_mismatch_multipole_pct": float(res_mult_lab["rms_envelope_excursion_pct"]),
+            "rms_mismatch_multipole_cf_pct": float(res_mult_cf["rms_envelope_excursion_pct"]),
             "rms_mismatch_multipole_zsf_pct": float(res_mult_zsf["rms_envelope_excursion_pct"]),
+            "rms_mismatch_full34_pct": float(res_full34_lab["rms_envelope_excursion_pct"]),
+            "rms_mismatch_full34_cf_pct": float(res_full34_cf["rms_envelope_excursion_pct"]),
             "rms_mismatch_full34_zsf_pct": float(res_full34_zsf["rms_envelope_excursion_pct"]),
+            "rms_mismatch_ctrl_pct": float(res_damper_lab["rms_envelope_excursion_pct"]),
+            "rms_mismatch_ctrl_cf_pct": float(res_damper_cf["rms_envelope_excursion_pct"]),
             "rms_mismatch_ctrl_zsf_pct": float(res_damper_zsf["rms_envelope_excursion_pct"]),
             "final_mismatch_uncomp_pct": float(res_open["final_mismatch_pct"]),
-            "final_mismatch_ctrl_pct": float(res_damper["final_mismatch_pct"]),
+            "final_mismatch_ctrl_pct": float(res_damper_zsf["final_mismatch_pct"]),
             "halo_fraction_uncomp_pct": float(res_open["halo_fraction_pct"]),
-            "halo_fraction_multipole_pct": float(res_mult["halo_fraction_pct"]),
-            "halo_fraction_full34_pct": float(res_full34["halo_fraction_pct"]),
-            "halo_fraction_ctrl_pct": float(res_damper["halo_fraction_pct"]),
+            "halo_fraction_multipole_pct": float(res_mult_lab["halo_fraction_pct"]),
+            "halo_fraction_multipole_cf_pct": float(res_mult_cf["halo_fraction_pct"]),
             "halo_fraction_multipole_zsf_pct": float(res_mult_zsf["halo_fraction_pct"]),
+            "halo_fraction_full34_pct": float(res_full34_lab["halo_fraction_pct"]),
+            "halo_fraction_full34_cf_pct": float(res_full34_cf["halo_fraction_pct"]),
             "halo_fraction_full34_zsf_pct": float(res_full34_zsf["halo_fraction_pct"]),
+            "halo_fraction_ctrl_pct": float(res_damper_lab["halo_fraction_pct"]),
+            "halo_fraction_ctrl_cf_pct": float(res_damper_cf["halo_fraction_pct"]),
             "halo_fraction_ctrl_zsf_pct": float(res_damper_zsf["halo_fraction_pct"]),
-            "max_poly_selfforce_uncorr": float(res_damper["max_poly_selfforce"]),
-            "max_applied_selfforce_uncorr": float(res_damper["max_applied_selfforce"]),
+            "max_poly_selfforce_uncorr": float(res_damper_cf["max_poly_selfforce"]),
+            "max_applied_selfforce_uncorr": float(res_damper_cf["max_applied_selfforce"]),
             "max_poly_selfforce_zsf": float(res_damper_zsf["max_poly_selfforce"]),
             "max_applied_selfforce_zsf": float(res_damper_zsf["max_applied_selfforce"]),
-            "centroid_drift_uncorr": float(res_damper["centroid_drift"]),
+            "rms_cm_err_uncorr": float(res_damper_cf["rms_cm_trajectory_err"]),
+            "rms_cm_err_zsf": float(res_damper_zsf["rms_cm_trajectory_err"]),
+            "centroid_drift_uncorr": float(res_damper_cf["centroid_drift"]),
             "centroid_drift_zsf": float(res_damper_zsf["centroid_drift"]),
             "brightness_preservation_factor": float(eps_uncomp_end / eps_ctrl_end),
             "ablation_modes": {
                 "A_open_loop": res_open,
-                "B_moment_multipole_only": res_mult,
-                "C_moment_full34_only": res_full34,
-                "D_moment_full34_plus_damper": res_damper,
-                "B_zsf_moment_multipole_only": res_mult_zsf,
-                "C_zsf_moment_full34_only": res_full34_zsf,
-                "D_zsf_moment_full34_plus_damper": res_damper_zsf,
+                "B_lab_multipole_only": res_mult_lab,
+                "B_cf_multipole_only": res_mult_cf,
+                "B_cf_zsf_multipole_only": res_mult_zsf,
+                "C_lab_full34_only": res_full34_lab,
+                "C_cf_full34_only": res_full34_cf,
+                "C_cf_zsf_full34_only": res_full34_zsf,
+                "D_lab_full34_plus_damper": res_damper_lab,
+                "D_cf_full34_plus_damper": res_damper_cf,
+                "D_cf_zsf_full34_plus_damper": res_damper_zsf,
             },
         }
 
     def evaluate_multiseed_robustness(
         self, first_seed_result: Optional[Dict] = None
     ) -> Dict[str, float | list]:
-        """Evaluates mean and standard deviation of emittance growth across multiple random seeds."""
+        """Evaluates mean and standard deviation of emittance growth across multiple random seeds for all modes."""
         seeds = self.config.multi_seeds
         open_list = []
-        mult_list = []
-        full34_list = []
-        damper_list = []
-        damper_zsf_list = []
+        mult_lab_list, mult_cf_list, mult_zsf_list = [], [], []
+        full34_lab_list, full34_cf_list, full34_zsf_list = [], [], []
+        damper_lab_list, damper_cf_list, damper_zsf_list = [], [], []
         for idx, s in enumerate(seeds):
             if idx == 0 and first_seed_result is not None and s == self.config.tracking_seed:
                 res = first_seed_result
             else:
                 res = self.simulate_multiturn_envelope_tracking(seed=s)
             open_list.append(float(res["emittance_growth_uncomp_pct"]))
-            mult_list.append(float(res["emittance_growth_multipole_pct"]))
-            full34_list.append(float(res["emittance_growth_full34_pct"]))
-            damper_list.append(float(res["emittance_growth_ctrl_pct"]))
+            mult_lab_list.append(float(res["emittance_growth_multipole_pct"]))
+            mult_cf_list.append(float(res["emittance_growth_multipole_cf_pct"]))
+            mult_zsf_list.append(float(res["emittance_growth_multipole_zsf_pct"]))
+            full34_lab_list.append(float(res["emittance_growth_full34_pct"]))
+            full34_cf_list.append(float(res["emittance_growth_full34_cf_pct"]))
+            full34_zsf_list.append(float(res["emittance_growth_full34_zsf_pct"]))
+            damper_lab_list.append(float(res["emittance_growth_ctrl_pct"]))
+            damper_cf_list.append(float(res["emittance_growth_ctrl_cf_pct"]))
             damper_zsf_list.append(float(res["emittance_growth_ctrl_zsf_pct"]))
         return {
             "seeds": list(seeds),
             "num_seeds": len(seeds),
             "open_values": open_list,
-            "multipole_values": mult_list,
-            "full34_values": full34_list,
-            "damper_values": damper_list,
+            "multipole_values": mult_lab_list,
+            "multipole_cf_values": mult_cf_list,
+            "multipole_zsf_values": mult_zsf_list,
+            "full34_values": full34_lab_list,
+            "full34_cf_values": full34_cf_list,
+            "full34_zsf_values": full34_zsf_list,
+            "damper_values": damper_lab_list,
+            "damper_cf_values": damper_cf_list,
             "damper_zsf_values": damper_zsf_list,
             "open_mean": float(np.mean(open_list)),
             "open_std_sample": float(np.std(open_list, ddof=1)),
             "open_std_pop": float(np.std(open_list, ddof=0)),
-            "multipole_mean": float(np.mean(mult_list)),
-            "multipole_std_sample": float(np.std(mult_list, ddof=1)),
-            "multipole_std_pop": float(np.std(mult_list, ddof=0)),
-            "full34_mean": float(np.mean(full34_list)),
-            "full34_std_sample": float(np.std(full34_list, ddof=1)),
-            "full34_std_pop": float(np.std(full34_list, ddof=0)),
-            "damper_mean": float(np.mean(damper_list)),
-            "damper_std_sample": float(np.std(damper_list, ddof=1)),
-            "damper_std_pop": float(np.std(damper_list, ddof=0)),
+            "multipole_mean": float(np.mean(mult_lab_list)),
+            "multipole_std_sample": float(np.std(mult_lab_list, ddof=1)),
+            "multipole_std_pop": float(np.std(mult_lab_list, ddof=0)),
+            "multipole_cf_mean": float(np.mean(mult_cf_list)),
+            "multipole_cf_std_sample": float(np.std(mult_cf_list, ddof=1)),
+            "multipole_cf_std_pop": float(np.std(mult_cf_list, ddof=0)),
+            "multipole_zsf_mean": float(np.mean(mult_zsf_list)),
+            "multipole_zsf_std_sample": float(np.std(mult_zsf_list, ddof=1)),
+            "multipole_zsf_std_pop": float(np.std(mult_zsf_list, ddof=0)),
+            "full34_mean": float(np.mean(full34_lab_list)),
+            "full34_std_sample": float(np.std(full34_lab_list, ddof=1)),
+            "full34_std_pop": float(np.std(full34_lab_list, ddof=0)),
+            "full34_cf_mean": float(np.mean(full34_cf_list)),
+            "full34_cf_std_sample": float(np.std(full34_cf_list, ddof=1)),
+            "full34_cf_std_pop": float(np.std(full34_cf_list, ddof=0)),
+            "full34_zsf_mean": float(np.mean(full34_zsf_list)),
+            "full34_zsf_std_sample": float(np.std(full34_zsf_list, ddof=1)),
+            "full34_zsf_std_pop": float(np.std(full34_zsf_list, ddof=0)),
+            "damper_mean": float(np.mean(damper_lab_list)),
+            "damper_std_sample": float(np.std(damper_lab_list, ddof=1)),
+            "damper_std_pop": float(np.std(damper_lab_list, ddof=0)),
+            "damper_cf_mean": float(np.mean(damper_cf_list)),
+            "damper_cf_std_sample": float(np.std(damper_cf_list, ddof=1)),
+            "damper_cf_std_pop": float(np.std(damper_cf_list, ddof=0)),
             "damper_zsf_mean": float(np.mean(damper_zsf_list)),
             "damper_zsf_std_sample": float(np.std(damper_zsf_list, ddof=1)),
             "damper_zsf_std_pop": float(np.std(damper_zsf_list, ddof=0)),
