@@ -6,7 +6,7 @@
 Official open-source Python reference engine and verification suite for the manuscript:
 
 > **Closed-Form Moment Reduction of 3D Space-Charge Fields for Fast Feedback in High-Intensity Hadron Rings**  
-> **Author:** Dr. Hyo Eun Ahn (`ahn@aya.yale.edu`)  
+> **Author:** Dr. Hyo Eun Ahn (`hyo.eun.ahn@proton.me`)  
 > **Theoretical Origin:** 1994 Los Alamos National Laboratory (LANL) Space-Charge Moment Formulations (`report1.pdf`, `poly-phi.pdf`, `poly-e.pdf`) + 2026 Moment-Space Zero-Self-Force (ZSF) Dipolar Offset Projection & De-Confounded Pairwise-Coulomb Tracking Ablation
 
 ---

@@ -1,7 +1,7 @@
 r"""
 High-Intensity Particle Accelerator 3D Space-Charge Moment Reduction Engine
 ===========================================================================
-Originator & Author: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
+Originator & Author: Dr. Hyo Eun Ahn (Independent Researcher, hyo.eun.ahn@proton.me)
 Companion Code for Paper:
   "Closed-Form Moment Reduction of 3D Space-Charge Fields for Fast Feedback
    in High-Intensity Hadron Rings" (doc/arXiv/Accelerator/accelerator_space_charge.tex)
@@ -76,7 +76,7 @@ class AcceleratorSpaceChargeConfig:
     revolution_deadline_us: float = 5.0
     tracking_num_particles: int = 500
     tracking_num_turns: int = 80
-    tracking_substeps_per_turn: int = 4
+    tracking_substeps_per_turn: int = 8
     tracking_seed: int = 42
     multi_seeds: Tuple[int, ...] = (42, 1, 7, 99)
     bare_tune_qx: float = 6.23
@@ -335,7 +335,7 @@ class AcceleratorSpaceChargeEngine:
         """
         Precomputes all offline matrices from poly-phi.pdf and poly-e.pdf using the
         reference prior measure w_i = mu_i so that the mesh dimension N completely
-        falls out of the turn-by-turn runtime loop.
+        falls out of the per-substep runtime loop.
         """
         t0 = time.perf_counter()
 
@@ -671,6 +671,7 @@ class AcceleratorSpaceChargeEngine:
         num_turns: Optional[int] = None,
         num_particles: Optional[int] = None,
         seed: Optional[int] = None,
+        num_substeps: Optional[int] = None,
     ) -> Dict[str, float | np.ndarray | Dict[str, Dict[str, float]]]:
         """
         Executes a non-circular 2D transverse (x, px, y, py) Leapfrog macro-particle
@@ -691,7 +692,7 @@ class AcceleratorSpaceChargeEngine:
         cfg = self.config
         n_turns = num_turns if num_turns is not None else cfg.tracking_num_turns
         n_part = num_particles if num_particles is not None else cfg.tracking_num_particles
-        n_sub = cfg.tracking_substeps_per_turn
+        n_sub = num_substeps if num_substeps is not None else cfg.tracking_substeps_per_turn
         run_seed = seed if seed is not None else cfg.tracking_seed
         phys = self.compute_beam_physics_parameters()
         dq_sc = abs(phys["delta_q_sc"]) * cfg.space_charge_lambda_scale
@@ -796,12 +797,34 @@ class AcceleratorSpaceChargeEngine:
             )
             cm_hist[0] = [float(np.mean(x)), float(np.mean(y))]
 
-            prev_s200 = float(np.mean((x - np.mean(x)) ** 2 if use_centroid_frame else x ** 2))
-            prev_s020 = float(np.mean((y - np.mean(y)) ** 2 if use_centroid_frame else y ** 2))
+            # Mode D turn-by-turn damper always tracks centroid-frame second moments:
+            # mean((x - mean(x))^2) is invariant to centroid drift and avoids overflow
+            # when bare tune Q >> 1 causes centroid to oscillate O(Q) times per turn.
+            prev_s200_turn = float(np.mean((x - np.mean(x)) ** 2))
+            prev_s020_turn = float(np.mean((y - np.mean(y)) ** 2))
             max_poly_selfforce = 0.0
             max_applied_selfforce = 0.0
 
             for turn in range(1, n_turns + 1):
+                # Mode D: true turn-by-turn second-moment difference damper
+                # Applied once per turn at the turn boundary, K_sub-independent.
+                # Uses centroid-frame second moments for all sub-modes (Lab/CF/CF-ZSF)
+                # to damp internal envelope oscillations independently of centroid drift.
+                if mode == "moment_full34_plus_damper":
+                    s200_t = float(np.mean((x - np.mean(x)) ** 2))
+                    s020_t = float(np.mean((y - np.mean(y)) ** 2))
+                    ds200_t = s200_t - prev_s200_turn
+                    ds020_t = s020_t - prev_s020_turn
+                    prev_s200_turn = s200_t
+                    prev_s020_turn = s020_t
+                    xc_d = x - np.mean(x)
+                    yc_d = y - np.mean(y)
+                    # Fixed turn-by-turn damper gain, K_sub-independent.
+                    # Applied once per revolution regardless of n_sub (g_D = 0.35/8 = 0.04375).
+                    _gain_d = 0.35 / 8.0
+                    px -= _gain_d * (ds200_t / (sigma0 ** 2)) * xc_d
+                    py -= _gain_d * (ds020_t / (sigma0 ** 2)) * yc_d
+
                 for _ in range(n_sub):
                     # 1. Symplectic Half-Drift (Linear Betatron Rotation)
                     x, px = chx * x + shx * px, -shx * x + chx * px
@@ -877,29 +900,8 @@ class AcceleratorSpaceChargeEngine:
                         px -= dt_kick * kappa_sc * Ex_model
                         py -= dt_kick * kappa_sc * Ey_model
 
-                        # In Mode D: add quadrupole envelope damper driven by
-                        # turn-to-turn differences of measured 2nd moments
-                        if mode == "moment_full34_plus_damper":
-                            s200 = float(s_turn[self.basis.get_index((2, 0, 0))])
-                            s020 = float(s_turn[self.basis.get_index((0, 2, 0))])
-                            ds200 = s200 - prev_s200
-                            ds020 = s020 - prev_s020
-                            prev_s200 = s200
-                            prev_s020 = s020
-                            xc = (
-                                coords_frame[:, 0]
-                                if use_centroid_frame
-                                else (x - float(s_turn[self.basis.get_index((1, 0, 0))]))
-                            )
-                            yc = (
-                                coords_frame[:, 1]
-                                if use_centroid_frame
-                                else (y - float(s_turn[self.basis.get_index((0, 1, 0))]))
-                            )
-                            dkx = 0.35 * (ds200 / (sigma0 ** 2)) * xc
-                            dky = 0.35 * (ds020 / (sigma0 ** 2)) * yc
-                            px -= dkx
-                            py -= dky
+                        # Mode D turn-by-turn damper is applied at the turn boundary
+                        # (before the substep loop), not inside the substep loop.
 
                     # 4. Symplectic Second Half-Drift
                     x, px = chx * x + shx * px, -shx * x + chx * px
@@ -1090,7 +1092,7 @@ class AcceleratorSpaceChargeEngine:
     def benchmark_accelerator_loop(
         self, num_runs: Optional[int] = None, s_input: Optional[np.ndarray] = None
     ) -> Dict[str, float]:
-        """Benchmarks the microsecond turn-by-turn latency of potential, 3D field, and ZSF engines."""
+        """Benchmarks the microsecond per-substep compute-kernel latency of potential, 3D field, and ZSF engines."""
         runs = num_runs if num_runs is not None else self.config.benchmark_iterations
         warmup = self.config.warmup_iterations
         s_test = s_input.copy() if s_input is not None else (self.Omega @ self.mu)

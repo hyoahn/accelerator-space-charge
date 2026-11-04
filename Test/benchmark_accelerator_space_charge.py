@@ -1,7 +1,7 @@
 """
 Dedicated Verification & Benchmark Suite for High-Intensity Accelerator Space-Charge Control
 ============================================================================================
-Author & Discoverer: Dr. Hyo Eun Ahn (Independent Researcher, ahn@aya.yale.edu)
+Author & Discoverer: Dr. Hyo Eun Ahn (Independent Researcher, hyo.eun.ahn@proton.me)
 Companion Benchmark for Paper:
   "Closed-Form Moment Reduction of 3D Space-Charge Fields for Fast Feedback
    in High-Intensity Hadron Rings" (doc/arXiv/Accelerator/accelerator_space_charge.tex)
@@ -42,35 +42,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
-for _p in (CURRENT_DIR, PROJECT_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
-try:
-    from Core.accelerator_space_charge_engine import (
-        AcceleratorSpaceChargeConfig,
-        AcceleratorSpaceChargeEngine,
+# Load engine from the same directory as this script, regardless of sys.path or
+# working directory, so that a stale engine in any parent folder cannot shadow it.
+_engine_path = CURRENT_DIR / "accelerator_space_charge_engine.py"
+if not _engine_path.exists():
+    raise FileNotFoundError(
+        f"Engine not found at expected path: {_engine_path}\n"
+        "Ensure accelerator_space_charge_engine.py is in the same directory as this script."
     )
-except ModuleNotFoundError:
-    try:
-        from accelerator_space_charge_engine import (
-            AcceleratorSpaceChargeConfig,
-            AcceleratorSpaceChargeEngine,
-        )
-    except ModuleNotFoundError:
-        _candidates = sorted(CURRENT_DIR.glob("accelerator_space_charge_engine*.py"))
-        if not _candidates:
-            raise
-        _spec = importlib.util.spec_from_file_location(
-            "accelerator_space_charge_engine", _candidates[-1]
-        )
-        assert _spec is not None and _spec.loader is not None
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules["accelerator_space_charge_engine"] = _mod
-        _spec.loader.exec_module(_mod)
-        AcceleratorSpaceChargeConfig = _mod.AcceleratorSpaceChargeConfig
-        AcceleratorSpaceChargeEngine = _mod.AcceleratorSpaceChargeEngine
+_spec = importlib.util.spec_from_file_location("accelerator_space_charge_engine", _engine_path)
+assert _spec is not None and _spec.loader is not None
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules["accelerator_space_charge_engine"] = _mod
+_spec.loader.exec_module(_mod)
+AcceleratorSpaceChargeConfig = _mod.AcceleratorSpaceChargeConfig
+AcceleratorSpaceChargeEngine = _mod.AcceleratorSpaceChargeEngine
 
 
 @dataclass(frozen=True)
@@ -86,7 +73,7 @@ class AcceleratorBenchmarkSpec:
     direct_pic_sample_runs: int = 50
     numerical_tolerance: float = 1e-10
     figure_dpi: int = 400
-    output_figure_relpath: str = "Assets/benchmark_accelerator.png"
+    output_figure_relpath: str = "benchmark_accelerator.png"
 
 
 def generate_bunch_spherical_mesh(spec: AcceleratorBenchmarkSpec) -> np.ndarray:
@@ -308,6 +295,52 @@ def run_accelerator_benchmark(
     assert tracking["max_applied_selfforce_zsf"] < spec.numerical_tolerance
     assert tracking["rms_cm_err_zsf"] < spec.numerical_tolerance
 
+    # 4b. 4-Seed Statistical Robustness (seeds = {42, 1, 7, 99})
+    print("\n[6b] 4-Seed Statistical Robustness (seeds = {42, 1, 7, 99}, reuses seed-42 result):")
+    multi = engine.evaluate_multiseed_robustness(first_seed_result=tracking)
+    def _fmt(mean, std_s, std_p):
+        return f"{mean:.2f}% ± {std_s:.2f}% (pop ±{std_p:.2f}%)"
+    print(f"    Mode A  Open-Loop          : {_fmt(multi['open_mean'],       multi['open_std_sample'],       multi['open_std_pop'])}")
+    print(f"    Mode B-Lab  (Multipole)    : {_fmt(multi['multipole_mean'],  multi['multipole_std_sample'],  multi['multipole_std_pop'])}")
+    print(f"    Mode B-CF   (Multipole-CF) : {_fmt(multi['multipole_cf_mean'],  multi['multipole_cf_std_sample'],  multi['multipole_cf_std_pop'])}")
+    print(f"    Mode B-CF-ZSF              : {_fmt(multi['multipole_zsf_mean'], multi['multipole_zsf_std_sample'], multi['multipole_zsf_std_pop'])}")
+    print(f"    Mode C-Lab  (Full34)       : {_fmt(multi['full34_mean'],     multi['full34_std_sample'],     multi['full34_std_pop'])}")
+    print(f"    Mode C-CF   (Full34-CF)    : {_fmt(multi['full34_cf_mean'],  multi['full34_cf_std_sample'],  multi['full34_cf_std_pop'])}")
+    print(f"    Mode C-CF-ZSF              : {_fmt(multi['full34_zsf_mean'], multi['full34_zsf_std_sample'], multi['full34_zsf_std_pop'])}")
+    print(f"    Mode D-Lab  (Damper)       : {_fmt(multi['damper_mean'],     multi['damper_std_sample'],     multi['damper_std_pop'])}")
+    print(f"    Mode D-CF   (Damper-CF)    : {_fmt(multi['damper_cf_mean'],  multi['damper_cf_std_sample'],  multi['damper_cf_std_pop'])}")
+    print(f"    Mode D-CF-ZSF              : {_fmt(multi['damper_zsf_mean'], multi['damper_zsf_std_sample'], multi['damper_zsf_std_pop'])}")
+    assert multi["damper_zsf_mean"] < multi["open_mean"], "D-CF-ZSF mean must beat open-loop mean"
+
+    # 4c. Macro-Particle Resolution Convergence (N_p ∈ {500, 1000, 2000}, Seed 42)
+    print("\n[6c] N_p Resolution Convergence (N_p ∈ {500, 1000, 2000}, Seed 42):")
+    for _n_p in (500, 1000, 2000):
+        _conv = tracking if _n_p == 500 else engine.simulate_multiturn_envelope_tracking(
+            seed=42, num_particles=_n_p
+        )
+        print(
+            f"    N_p = {_n_p:4d}: "
+            f"Open={_conv['emittance_growth_uncomp_pct']:6.2f}%  "
+            f"B-CF-ZSF={_conv['emittance_growth_multipole_zsf_pct']:6.2f}%  "
+            f"C-CF-ZSF={_conv['emittance_growth_full34_zsf_pct']:6.2f}%  "
+            f"D-CF-ZSF={_conv['emittance_growth_ctrl_zsf_pct']:6.2f}%"
+        )
+    assert tracking["emittance_growth_ctrl_zsf_pct"] < tracking["emittance_growth_uncomp_pct"], \
+        "D-CF-ZSF (N_p=500) must beat open-loop"
+
+    # [6d] K_sub Substep-Count Convergence (N_p=500, Seed 42, K_sub ∈ {4, 8, 16, 32}, fixed g_D=0.04375)
+    print("\n[6d] K_sub Substep-Count Convergence (N_p=500, Seed 42, K_sub ∈ {4, 8, 16, 32}, fixed g_D=0.04375):")
+    print(f"    {'K_sub':>6}  {'Open':>8}  {'B-CF-ZSF':>10}  {'C-CF-ZSF':>10}  {'D-CF-ZSF':>10}")
+    for _k in (4, 8, 16, 32):
+        _ks = engine.simulate_multiturn_envelope_tracking(seed=42, num_particles=500, num_substeps=_k)
+        print(
+            f"    {_k:>6}  "
+            f"{_ks['emittance_growth_uncomp_pct']:>8.2f}%  "
+            f"{_ks['emittance_growth_multipole_zsf_pct']:>9.2f}%  "
+            f"{_ks['emittance_growth_full34_zsf_pct']:>9.2f}%  "
+            f"{_ks['emittance_growth_ctrl_zsf_pct']:>9.2f}%"
+        )
+
     # 5. Active Multipole Space-Charge Compensation & Compute Kernel Latency
     kick_res = engine.execute_realtime_bpm_multipole_control(s_bpm)
     bench = engine.benchmark_accelerator_loop(s_input=s_bpm)
@@ -332,7 +365,7 @@ def run_accelerator_benchmark(
         _ = engine.G_z @ a_recon
     t_direct_pic_us = ((time.perf_counter() - t_pic0) / spec.direct_pic_sample_runs) * 1e6
 
-    out_path = PROJECT_ROOT / spec.output_figure_relpath
+    out_path = CURRENT_DIR / spec.output_figure_relpath
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
@@ -420,6 +453,7 @@ def run_accelerator_benchmark(
         "pot_us": pot_us,
         "field_us": field_us,
         "tracking": tracking,
+        "multi_seed": multi,
         "fidelity": fidelity,
         "phys": phys,
     }
